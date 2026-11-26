@@ -10,6 +10,7 @@ import static cn.classfun.droidvm.lib.utils.FileUtils.findExecute;
 import static cn.classfun.droidvm.lib.utils.ProcessUtils.SIGHUP;
 import static cn.classfun.droidvm.lib.utils.ProcessUtils.shellKillProcess;
 import static cn.classfun.droidvm.lib.utils.RunUtils.escapedString;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
 import static cn.classfun.droidvm.lib.utils.ThreadUtils.runOnPool;
 import static cn.classfun.droidvm.lib.utils.ThreadUtils.threadSleep;
@@ -211,7 +212,7 @@ public final class AgentOperationActivity extends AppCompatActivity
     private void startConsoleSession(@NonNull String stream) {
         stopConsoleSession();
         if (vmId == null || vmId.isEmpty() || closing || vmExited) return;
-        var shell = findExecute("su", "/system/bin/su");
+        var shell = RunUtils.isNoRootMode() ? "/system/bin/sh" : findExecute("su", "/system/bin/su");
         var cwd = getFilesDir().getAbsolutePath();
         var command = fmt(
             "exec %s console --raw %s %s",
@@ -219,7 +220,7 @@ public final class AgentOperationActivity extends AppCompatActivity
             escapedString(vmId),
             escapedString(stream)
         );
-        var args = new String[]{"su", "-c", command};
+        var args = RunUtils.isNoRootMode() ? new String[]{"-c", command} : new String[]{"su", "-c", command};
         var env = new String[]{
             "TERM=xterm-256color",
             "PATH=/system/bin",

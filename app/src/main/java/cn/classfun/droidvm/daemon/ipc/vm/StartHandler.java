@@ -9,6 +9,7 @@ import androidx.annotation.NonNull;
 
 import com.google.auto.service.AutoService;
 
+import cn.classfun.droidvm.daemon.Daemon;
 import cn.classfun.droidvm.daemon.server.ClientRequest;
 import cn.classfun.droidvm.daemon.server.RequestException;
 import cn.classfun.droidvm.daemon.server.RequestHandler;
@@ -26,6 +27,7 @@ public final class StartHandler extends RequestHandler {
     public void handle(@NonNull ClientRequest request) throws Exception {
         var params = request.getParams();
         var vmId = params.optString("vm_id", "");
+        Daemon.debugLog("vm_start requested for " + vmId);
         if (vmId.isEmpty())
             throw new RequestException("missing vm_id");
         var vms = request.getContext().getVMs();

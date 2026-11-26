@@ -202,23 +202,67 @@ public final class AssetUtils {
     }
 
     public static void extractBinaries(@NonNull Context context) {
-        // Only the CMake-built binaries (droidvm, daemon) ship as APK assets.
-        // The third-party daemons and lbx now arrive via the prebuilt tar.xz
-        // (extracted to DATA/bin/<name>), and 7za has been removed entirely.
+        Log.i(TAG, "extractBinaries: starting extraction");
+        Log.i(TAG, fmt("extractBinaries: SUPPORTED_ABIS[0]=%s", android.os.Build.SUPPORTED_ABIS.length > 0 ? android.os.Build.SUPPORTED_ABIS[0] : "none"));
+        Log.i(TAG, fmt("extractBinaries: DATA_DIR=%s", DATA_DIR));
+        Log.i(TAG, fmt("extractBinaries: getDataDir=%s", context.getDataDir().getAbsolutePath()));
+        // Delete old binaries first to force re-extraction (hash.json may be stale)
+        for (var name : BINARIES_BUILT) {
+            var f = new File(context.getDataDir(), pathJoin("bin", name));
+            if (f.exists() && f.delete())
+                Log.d(TAG, fmt("extractBinaries: deleted old %s", f));
+        }
         extractAsset(context, "bin", BINARIES_BUILT, false);
+        // Verify extraction
+        for (var name : BINARIES_BUILT) {
+            var f = new File(context.getDataDir(), pathJoin("bin", name));
+            Log.i(TAG, fmt("extractBinaries: %s exists=%s, exec=%s, size=%d",
+                name, f.exists(), f.canExecute(), f.length()));
+        }
     }
 
     @SuppressLint("SetWorldReadable")
     public static void extractLibraries(@NonNull Context context) {
         var srcDir = new File(context.getApplicationInfo().nativeLibraryDir);
         var srcFiles = srcDir.listFiles((dir, name) -> name.endsWith(".so"));
-        if (srcFiles == null || srcFiles.length == 0) {
-            Log.w(TAG, fmt("No installed native library in %s", srcDir));
-            return;
-        }
         var dstDir = new File(context.getDataDir(), "lib");
         if (!dstDir.exists() && !dstDir.mkdirs())
             Log.w(TAG, fmt("Failed to create native library dir: %s", dstDir));
+        if (srcFiles == null || srcFiles.length == 0) {
+            // Modern installs can keep native libs inside the APK itself (extractNativeLibs
+            // off: nativeLibraryDir absent), yet the daemon still points LD_PRELOAD and
+            // System.load at these copies. Fall back to pulling every lib/*.so straight out
+            // of the APK, otherwise a missing LD_PRELOAD lib makes every VM start fail
+            // with exec error 127 before the guest even begins to boot.
+            var apk = context.getApplicationInfo().sourceDir;
+            if (apk == null) {
+                Log.w(TAG, fmt("No installed native library in %s", srcDir));
+                return;
+            }
+            Log.i(TAG, fmt("nativeLibraryDir empty (%s); extracting libs from %s", srcDir, apk));
+            try (var zip = new java.util.zip.ZipFile(apk)) {
+                for (var e : java.util.Collections.list(zip.entries())) {
+                    var name = new File(e.getName());
+                    if (e.isDirectory() || !name.getName().endsWith(".so")) continue;
+                    var dst = new File(dstDir, name.getName());
+                    try {
+                        if (dst.exists() && !dst.delete())
+                            Log.w(TAG, fmt("Could not unlink old native library: %s", dst));
+                        try (var in = zip.getInputStream(e); var out = new FileOutputStream(dst)) {
+                            copyStream(in, out);
+                        }
+                        if (!dst.setReadable(true, false))
+                            Log.w(TAG, "setReadable failed");
+                        Log.i(TAG, fmt("Extracted APK native library %s to %s", e.getName(), dst));
+                    } catch (Exception ex) {
+                        Log.e(TAG, fmt("Failed to extract native library %s", e.getName()), ex);
+                    }
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, fmt("Failed to open APK for native library extraction: %s", apk), ex);
+            }
+            return;
+        }
         for (var src : srcFiles) {
             var dst = new File(dstDir, src.getName());
             try {
@@ -394,6 +438,11 @@ public final class AssetUtils {
 
     @NonNull
     public static String getPrebuiltBinaryPath(@NonNull String name) {
+        // A binary dropped into DATA/bin is a deliberate override: bin/ is outside the
+        // prebuilt hash manifest (which covers usr/bin), so replacing crosvm there survives
+        // app updates and prebuilt re-extraction. Fall back to the packaged usr/bin copy.
+        var override = new File(DATA_DIR, "bin/" + name);
+        if (override.isFile()) return override.getAbsolutePath();
         return pathJoin(DATA_DIR, "usr", "bin", name);
     }
 }

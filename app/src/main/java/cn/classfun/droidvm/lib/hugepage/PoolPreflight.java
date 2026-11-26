@@ -18,6 +18,7 @@ import java.util.function.BooleanSupplier;
 
 import cn.classfun.droidvm.lib.store.base.DataItem;
 import cn.classfun.droidvm.lib.store.vm.GuestPoolSizing;
+import cn.classfun.droidvm.lib.store.vm.LendMthpMode;
 import cn.classfun.droidvm.lib.store.vm.VMBackend;
 import cn.classfun.droidvm.lib.store.vm.VMHypervisor;
 
@@ -130,7 +131,14 @@ public final class PoolPreflight {
     public static boolean appliesTo(@NonNull DataItem item) {
         var backend = optEnum(item, "backend", VMBackend.DEFAULT);
         var configured = optEnum(item, "hypervisor", VMHypervisor.DEFAULT);
-        return VMHypervisor.resolveConfigured(backend, configured) == VMHypervisor.GUNYAH;
+        if (VMHypervisor.resolveConfigured(backend, configured) != VMHypervisor.GUNYAH) return false;
+        // The reserve only backs memory the VMM actually asks it for: --hugepages, or a LEND
+        // mode. A VM with both off never touches the pool, so sizing it against the reserve
+        // only blocks the start on memory it was never going to use -- which is what happened
+        // here: hugepages=false + prepare_lend_mthp=disabled, and the start was stopped by a
+        // pool that had 2.2 GB free against a 3 GB "need".
+        if (item.optBoolean("hugepages", true)) return true;
+        return LendMthpMode.fromItem(item) != LendMthpMode.DISABLED;
     }
 
     /** Reads the reserve and sizes this VM against it. Never throws. */
@@ -238,6 +246,52 @@ public final class PoolPreflight {
         if (writeKnob("acquire", Integer.toString(mode)))
             return true;
         return writeKnob("manual_refill", "1");
+    }
+
+    /**
+     * Frees the reserve before a Gunyah VM starts.
+     *
+     * <p>The reserve is only useful when the module can hand its folios to the VM's guest RAM.
+     * On kernels where the guest's mTHP collapse allocates through {@code __folio_alloc_noprof},
+     * the module's serve kretprobe (registered on the {@code __alloc_pages*} family) never sees
+     * those allocations: {@code served} stays zero, the 2 GB stays parked in unmovable
+     * pageblocks, and the VM's {@code FOLL_LONGTERM} pin has nowhere to migrate the movable
+     * guest pages. Unloading the module returns those pageblocks to the buddy allocator, where
+     * the pin's migration can take them.</p>
+     *
+     * <p>Best-effort and idempotent: no module (or no root) is a no-op. The wait is bounded
+     * because rmmod is synchronous; it only covers the sysfs directory going away.</p>
+     */
+    public static void releaseForStart(@NonNull DataItem item) {
+        if (!appliesTo(item))
+            return;
+        // A VM started with --prepare-lend-mthp-mode consumes the reserve; unloading it here
+        // deletes the pool crosvm is about to ask for, leaving the flag pointing at nothing.
+        // The 2026-11-22 workaround only applies to the SHIM path, where the reserve's
+        // unmovable pages block the pin migration.
+        if (LendMthpMode.fromItem(item) != LendMthpMode.DISABLED) {
+            Log.i(TAG, "keeping the huge-page reserve: this VM uses the LEND mTHP path");
+            return;
+        }
+        var path = pathJoin(SYSFS_PARAMS, "pool_avail");
+        if (!shellCheckExists(path))
+            return;
+        Log.i(TAG, "releasing the huge-page reserve before the VM starts");
+        if (!run("rmmod gh_hugepage_reserve").isSuccess()) {
+            Log.w(TAG, "could not unload gh_hugepage_reserve; the VM may stall in pin migration");
+            return;
+        }
+        for (int i = 0; i < 25; i++) {
+            if (!shellCheckExists(path))
+                return;
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        Log.w(TAG, "gh_hugepage_reserve is still present after rmmod");
     }
 
     private static boolean writeKnob(@NonNull String knob, @NonNull String value) {

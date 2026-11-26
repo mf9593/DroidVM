@@ -137,6 +137,17 @@ public final class VMConsoleRouter {
         intent.putExtra(BaseVncActivity.EXTRA_VM_NAME, config.getName());
         intent.putExtra(BaseVncActivity.EXTRA_SCREEN, screenId);
         intent.putExtra(BaseVncActivity.EXTRA_INPUT_ENABLED, inputEnabled(config.item, screenId));
+        // The endpoint this screen binds is already in the config. Handing it to the console
+        // lets it connect before (or without) the daemon's vm_vnc_info reply, which is what
+        // keeps a local VNC screen from sitting on "connecting" while the broker reconnects.
+        var screen = VMScreenConfig.find(config.item, screenId);
+        if (screen != null) {
+            var host = screen.getVncHost();
+            if (host == null || host.isEmpty()) host = "127.0.0.1";
+            intent.putExtra(BaseVncActivity.EXTRA_VNC_HOST, host);
+            intent.putExtra(BaseVncActivity.EXTRA_VNC_PORT, (int) screen.getVncPort());
+            intent.putExtra(BaseVncActivity.EXTRA_VNC_PASSWORD, screen.getVncPassword());
+        }
         ctx.startActivity(intent);
     }
     // openVncExt retired: projecting to an external display is now an action inside the VNC

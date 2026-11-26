@@ -255,6 +255,30 @@ final class Netbox {
         return args.toArray(new String[0]);
     }
 
+    /**
+     * Every link as netbox sees it, or an empty array when the query fails.
+     *
+     * <p>The app's own view of the interface list is unavailable on some ROMs: SELinux denies
+     * untrusted_app {@code search/read} on {@code /sys/class/net} (sysfs_net), and
+     * {@code NetworkInterface} enumerates over a netlink socket the app may not open. netbox
+     * runs as root and answers the same question, which is why the network backend uses it for
+     * existence checks and uplink discovery instead of sysfs.</p>
+     */
+    @NonNull
+    static JSONArray linkList() {
+        return query(List.of("link-list"));
+    }
+
+    /** Whether [name] exists, asked through netbox rather than the app's (filtered) view. */
+    static boolean linkExists(@NonNull String name) {
+        var arr = linkList();
+        for (int i = 0; i < arr.length(); i++) {
+            var o = arr.optJSONObject(i);
+            if (o != null && name.equals(o.optString("ifname"))) return true;
+        }
+        return false;
+    }
+
     private static boolean run(@NonNull String... args) {
         var cmd = new ArrayList<String>(args.length + 1);
         cmd.add(getAssetBinaryPath("netbox"));
@@ -263,6 +287,15 @@ final class Netbox {
         if (!result.isSuccess()) {
             Log.w(TAG, fmt("netbox %s failed (exit %d): %s",
                 args[0], result.getCode(), result.getErrString()));
+            // logcat is unreadable on some ROMs; the daemon log is where the network
+            // start failure is diagnosed.
+            try {
+                cn.classfun.droidvm.daemon.Daemon.debugLog(fmt(
+                    "netbox %s failed exit=%d err=%s out=%s",
+                    args[0], result.getCode(),
+                    result.getErrString().trim(), result.getOutString().trim()));
+            } catch (Exception ignored) {
+            }
         }
         return result.isSuccess();
     }
@@ -276,6 +309,12 @@ final class Netbox {
         if (!result.isSuccess()) {
             Log.w(TAG, fmt("netbox %s failed (exit %d): %s",
                 args.get(0), result.getCode(), result.getErrString()));
+            try {
+                cn.classfun.droidvm.daemon.Daemon.debugLog(fmt(
+                    "netbox %s failed exit=%d err=%s",
+                    args.get(0), result.getCode(), result.getErrString().trim()));
+            } catch (Exception ignored) {
+            }
             return new JSONArray();
         }
         try {

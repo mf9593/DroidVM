@@ -12,6 +12,8 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import cn.classfun.droidvm.daemon.Daemon;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -163,8 +165,12 @@ public final class DaemonConnection {
     private void waitForPortFile() {
         if (!running) return;
         var file = new File(getPortFile());
-        if (!file.exists())
-            Log.i(TAG, "Waiting for daemon port file...");
+        // Delete stale port file so we don't connect to a dead daemon
+        if (file.exists()) {
+            Daemon.debugLog("waitForPortFile: deleting stale port file");
+            file.delete();
+            threadSleep(200);
+        }
         while (running && !file.exists())
             threadSleep(300);
         if (file.exists())
@@ -178,21 +184,27 @@ public final class DaemonConnection {
             newClient.setEventCallback(this::dispatchEvent);
             newClient.setConnectionCallback(disconnectLatch::countDown);
             try {
+                Daemon.debugLog("connectionLoop: waiting for port file");
                 waitForPortFile();
+                Daemon.debugLog("connectionLoop: port file found, connecting");
                 newClient.connect(DaemonHelper.readPort());
                 client = newClient;
+                Daemon.debugLog("connectionLoop: connected to daemon");
                 Log.i(TAG, "Connected to daemon");
                 if (!authenticate(newClient)) {
+                    Daemon.debugLog("connectionLoop: authentication failed");
                     Log.e(TAG, "Authentication failed, disconnecting");
                     newClient.close();
                     throw new IOException("Authentication failed");
                 }
+                Daemon.debugLog("connectionLoop: authentication succeeded");
                 consecutiveFailures.set(0);
                 callConnected();
                 disconnectLatch.await();
             } catch (InterruptedException ignored) {
                 continue;
             } catch (Exception e) {
+                Daemon.debugLog("connectionLoop: exception: " + e);
                 if (running) {
                     int failures = consecutiveFailures.incrementAndGet();
                     if (failures <= 3) {

@@ -218,6 +218,11 @@ static rfbBool vnc_resize(rfbClient *cl) {
     cl->format.blueMax = 0xFF;
     cl->format.bigEndian = FALSE;
     cl->format.trueColour = TRUE;
+    /* The crosvm libvncserver aborts in its ZRLE path on this host, and its
+     * Tight/JPEG path needs libjpeg-turbo which is also absent. Ask for Raw
+     * only; the pseudo-encodings (ExtDesktopSize / Supported*) are appended
+     * by SetClientEncodings regardless and carry no pixel data. */
+    cl->appData.encodingsString = strdup("raw");
     pthread_mutex_unlock(&ctx->lock);
     LOGI("resize %dx%d", w, h);
     JNIEnv *env = NULL;
@@ -292,6 +297,21 @@ JNI_PREFIX(nativeCreate)(JNIEnv *env, jobject thiz) {
         LOGE("rfbGetClient failed");
         return 0;
     }
+    /* This must be set before rfbInitClient: that call sends SetPixelFormat to
+     * the server during the handshake. Changing the format later in
+     * MallocFrameBuffer only affects our side, so the server keeps sending the
+     * default 8bpp/3/4 format while copyPixels reads it as 32bpp -- a black
+     * console. Keep the same format in vnc_resize too. */
+    cl->format.bitsPerPixel = 32;
+    cl->format.depth = 24;
+    cl->format.redShift = 0;
+    cl->format.greenShift = 8;
+    cl->format.blueShift = 16;
+    cl->format.redMax = 0xFF;
+    cl->format.greenMax = 0xFF;
+    cl->format.blueMax = 0xFF;
+    cl->format.bigEndian = FALSE;
+    cl->format.trueColour = TRUE;
     VncContext *ctx = (VncContext *) calloc(1, sizeof(VncContext));
     pthread_mutex_init(&ctx->lock, NULL);
     (*env)->GetJavaVM(env, &ctx->jvm);

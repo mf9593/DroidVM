@@ -17,6 +17,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
+import android.os.IBinder;
 import android.util.Log;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
@@ -326,6 +327,86 @@ public final class VMNativeDisplayActivity extends AppCompatActivity
                 }
             });
         displayAttach.start();
+        // crosvm registers the per-VM display binder in servicemanager, and this app's UID can
+        // see it directly (verified with `run-as ... service list`). Start the display source
+        // immediately instead of waiting for the daemon broker's display_attach broadcast:
+        // when that broadcast does not arrive, the console sat on "connecting" forever even
+        // though the crosvm service was already there.
+        startDisplaySource();
+    }
+
+    /**
+     * Creates the native display source once. Called from onCreate (direct servicemanager path)
+     * and from the daemon broker callback (which may arrive later or not at all).
+     */
+    private void startDisplaySource() {
+        dbg("startDisplaySource vmKey=" + vmKey);
+        if (displaySource != null) return;
+        displaySource = new NativeSurfaceSource(
+            surfaceView, guestWidth, guestHeight,
+            this::resolveDisplayBinder,
+            mainHandler,
+            new DisplaySource.Callbacks() {
+                @Override
+                public void onContentSize(int width, int height) {
+                    guestWidth = width;
+                    guestHeight = height;
+                    viewport.setContentSize(width, height);
+                    // Keep the status-bar resolution label in step with a live resize.
+                    if (connected)
+                        setStatus(fmt(getString(R.string.native_display_connected),
+                            guestWidth, guestHeight), R.color.vnc_status_connected);
+                }
+
+                @Override
+                public void onStateChanged(@NonNull DisplaySource.State state) {
+                    onDisplayStateChanged(state);
+                }
+            });
+        // Hardware cursor: give crosvm a Surface for the guest's cursor plane and follow the
+        // positions it reports. Both are no-ops on a guest that never uses the cursor plane.
+        displaySource.setCursorView(cursorView);
+        displaySource.setCursorListener(this::onGuestCursorMoved);
+        displaySource.start();
+    }
+
+    /**
+     * The per-VM crosvm display binder. Direct servicemanager first (the app UID is allowed to
+     * look it up), daemon broker second -- the broker is the old path and is kept as a fallback
+     * for SELinux configurations where the direct lookup is denied.
+     */
+    private void dbg(String msg) {
+        try {
+            var f = new java.io.File(getFilesDir(), "native-display-debug.log");
+            try (var w = new java.io.FileWriter(f, true)) {
+                w.write(System.currentTimeMillis() + " Activity: " + msg + "\n");
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Nullable
+    private IBinder resolveDisplayBinder() {
+        try {
+            var sm = Class.forName("android.os.ServiceManager");
+            var get = sm.getMethod("getService", String.class);
+            var binder = (IBinder) get.invoke(null, vmKey);
+            dbg("direct ServiceManager " + vmKey + " -> " + (binder != null));
+            if (binder != null) return binder;
+        } catch (Exception e) {
+            dbg("direct ServiceManager failed: " + e);
+        }
+        var svc = displayAttach != null ? displayAttach.getService() : null;
+        dbg("daemon broker service -> " + (svc != null));
+        if (svc == null) return null;
+        try {
+            var binder = svc.waitForDisplayBinder(vmKey);
+            dbg("broker waitForDisplayBinder -> " + (binder != null));
+            return binder;
+        } catch (Exception e) {
+            dbg("broker waitForDisplayBinder failed: " + e);
+            return null;
+        }
     }
 
     private void onRootConnected(@NonNull INativeDisplayRootService service) {
@@ -347,44 +428,9 @@ public final class VMNativeDisplayActivity extends AppCompatActivity
             .onError(e -> Log.w(TAG, "vm_start request failed", e))
             .invoke();
 
-        // Display binder is looked up via the root service (servicemanager) on a bg thread.
-        displaySource = new NativeSurfaceSource(
-            surfaceView, guestWidth, guestHeight,
-            () -> {
-                var svc = displayAttach.getService();
-                if (svc == null) return null;
-                try {
-                    return svc.waitForDisplayBinder(vmKey);
-                } catch (Exception e) {
-                    return null;
-                }
-            },
-            mainHandler,
-            new DisplaySource.Callbacks() {
-                @Override
-                public void onContentSize(int width, int height) {
-                    guestWidth = width;
-                    guestHeight = height;
-                    viewport.setContentSize(width, height);
-                    // Keep the status-bar resolution label in step with a live resize.
-                    if (connected)
-                        setStatus(fmt(getString(R.string.native_display_connected),
-                            guestWidth, guestHeight), R.color.vnc_status_connected);
-                }
-
-                @Override
-                public void onStateChanged(@NonNull DisplaySource.State state) {
-                    onDisplayStateChanged(state);
-                }
-            });
-        // Hardware cursor: give crosvm a Surface for the guest's cursor plane and follow the
-        // positions it reports. Both are no-ops on a guest that never uses the cursor plane.
-        // This must run here, on the main thread with displaySource assigned -- it used to sit
-        // inside the binder-supplier lambda above, where the first invocation raced the field
-        // assignment on a background thread and the cursor layer was wired only by luck.
-        displaySource.setCursorView(cursorView);
-        displaySource.setCursorListener(this::onGuestCursorMoved);
-        displaySource.start();
+        // The display source is started from onCreate already (direct servicemanager path);
+        // this call is a no-op when it is running and covers the broker-only case.
+        startDisplaySource();
     }
 
     private void onDisplayStateChanged(@NonNull DisplaySource.State state) {
@@ -880,7 +926,9 @@ public final class VMNativeDisplayActivity extends AppCompatActivity
             boolean fullscreen = chrome != null && chrome.isFullscreen();
             int top = fullscreen ? 0 : sysBars.top;
             int bottom = Math.max(fullscreen ? 0 : sysBars.bottom, ime.bottom);
-            v.setPadding(0, top, 0, bottom);
+            int left = fullscreen ? 0 : sysBars.left;
+            int right = fullscreen ? 0 : sysBars.right;
+            v.setPadding(left, top, right, bottom);
             return insets;
         });
         ViewCompat.requestApplyInsets(root);

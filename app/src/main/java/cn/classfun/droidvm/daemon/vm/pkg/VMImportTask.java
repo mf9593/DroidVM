@@ -96,6 +96,11 @@ public final class VMImportTask {
         var data = DataItem.newObject();
         try {
             unpack();
+            // A package whose disk payload never landed would otherwise register a VM that still
+            // points at the exporting phone's image (the manifest path), with default memory and
+            // no copied disks: a malformed duplicate of an existing VM. Verify that every disk
+            // path was remapped into this import's own folder before anything is registered.
+            validateImportedDisks();
             var networks = importNetworks(importedVM, importedManifest.networks);
             resolveLeases(importedVM);
             var vmId = server.getContext().getVMs().createVM(importedVM);
@@ -196,6 +201,30 @@ public final class VMImportTask {
                 disk.backingArchive, disk.archivePath
             ));
             ImageUtils.rebaseBacking(disk.target.getPath(), parent.target.getPath());
+        }
+    }
+
+    /**
+     * Rejects a package whose disk entries were not replaced by copies under {@link #vmDir}.
+     *
+     * <p>This is what catches a metadata-only (or truncated) package: the manifest names the
+     * exporting phone's absolute disk paths, but no tar entry matched them, so remapDiskPaths
+     * left them untouched. Registering that VM would create a 512 MB copy that points at another
+     * VM's image -- exactly the `(2)` duplicate users saw -- and it would be unstartable.</p>
+     */
+    private void validateImportedDisks() throws IOException {
+        if (importedVM == null || importedManifest == null)
+            throw new IOException("package has no VM manifest");
+        if (!importedManifest.disks.isEmpty() && placedDisks.isEmpty())
+            throw new IOException("package contains no disk payload");
+        var dir = vmDir == null ? "" : vmDir.getCanonicalPath() + File.separator;
+        var disks = importedVM.item.opt("disks", null);
+        if (disks == null) return;
+        for (var iter : disks) {
+            var path = iter.getValue().optString("path", "");
+            if (path.isEmpty()) continue;
+            if (!new File(path).getCanonicalPath().startsWith(dir))
+                throw new IOException(fmt("imported disk was not copied: %s", path));
         }
     }
 

@@ -11,6 +11,7 @@ import static cn.classfun.droidvm.lib.utils.FileUtils.findExecute;
 import static cn.classfun.droidvm.lib.utils.ProcessUtils.SIGHUP;
 import static cn.classfun.droidvm.lib.utils.ProcessUtils.shellKillProcess;
 import static cn.classfun.droidvm.lib.utils.RunUtils.escapedString;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
 import static cn.classfun.droidvm.lib.utils.StringUtils.getEditText;
 import static cn.classfun.droidvm.lib.utils.ThreadUtils.runOnPool;
@@ -29,6 +30,8 @@ import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
+
+import java.io.File;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -144,10 +147,21 @@ public final class VMConsoleActivity extends AppCompatActivity {
     }
 
     private void startSession() {
+        var binaryPath = getAssetBinaryPath("droidvm");
+        var binaryFile = new File(binaryPath);
+        if (!binaryFile.exists()) {
+            Toast.makeText(this, "droidvm binary not found at " + binaryPath + ", please reinstall the app", LENGTH_SHORT).show();
+            Log.e(TAG, "droidvm binary not found at " + binaryPath);
+            return;
+        }
+        if (!binaryFile.canExecute()) {
+            binaryFile.setExecutable(true, false);
+            Log.w(TAG, "droidvm binary was not executable, set executable now");
+        }
         stopSession();
-        var shell = findExecute("su", "/system/bin/su");
+        var shell = RunUtils.isNoRootMode() ? "/system/bin/sh" : findExecute("su", "/system/bin/su");
         var cwd = getFilesDir().getAbsolutePath();
-        var args = new String[]{"su", "-c", buildCommand()};
+        var args = RunUtils.isNoRootMode() ? new String[]{"-c", buildCommand()} : new String[]{"su", "-c", buildCommand()};
         var env = new String[]{
             "TERM=xterm-256color",
             "PATH=/system/bin",

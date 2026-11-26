@@ -93,6 +93,18 @@
     <string name="home_card_wizard_title">创建向导</string>
     <string name="home_card_import_title">导入虚拟机</string>
     <string name="home_card_sysinfo_kernel">内核版本</string>
+    <string name="home_card_mem_hint">\u542f\u52a8 VM \u5efa\u8bae \u2265 3.5 GB</string>
+    <string name="home_card_mem_hint_low">\u504f\u4f4e\uff0c\u542f\u52a8 VM \u53ef\u80fd\u5931\u8d25</string>
+    <string name="home_release_memory">\u91ca\u653e\u5185\u5b58</string>
+    <string name="home_release_running">\u6b63\u5728\u91ca\u653e\u2026</string>
+    <string name="home_release_done">\u5df2\u91ca\u653e %1$s \u00b7 \u5f53\u524d\u53ef\u7528 %2$s</string>
+    <string name="home_release_need_root">\u91ca\u653e\u5185\u5b58\u9700\u8981 root \u6743\u9650</string>
+    <string name="home_release_low_title">\u5185\u5b58\u4ecd\u7136\u4e0d\u8db3</string>
+    <string name="home_release_low_msg">\u5df2\u91ca\u653e %1$s\uff0c\u5f53\u524d\u53ef\u7528 %2$s\u3002\u4e0b\u9762\u8fd9\u4e9b\u5e94\u7528\u5360\u7528\u8f83\u591a\u5185\u5b58\uff0c\u5f3a\u5236\u505c\u6b62\u53ef\u4ee5\u518d\u91ca\u653e\u4e00\u4e9b\uff08\u5e94\u7528\u4f1a\u88ab\u5173\u95ed\uff09\uff1a</string>
+    <string name="home_release_force_stop">\u5f3a\u5236\u505c\u6b62</string>
+    <string name="home_release_deep_done">\u5df2\u505c\u6b62 %1$d \u4e2a\u5e94\u7528 \u00b7 \u5f53\u524d\u53ef\u7528 %2$s</string>
+    <string name="home_release_app_item">%1$s \u00b7 %2$s</string>
+    <string name="home_card_sysinfo_mem">可用内存</string>
     <string name="home_card_sysinfo_soc">SoC 型号</string>
     <string name="home_card_help_title">帮助与文档</string>
     <string name="home_card_feedback_title">反馈问题</string>
@@ -305,6 +317,7 @@
     <string name="create_vm_display_refresh_rate">刷新率 (Hz)</string>
     <string name="create_vm_display_poll_hz">轮询率 (Hz)</string>
     <string name="create_vm_display_resolution">分辨率</string>
+    <string name="create_vm_display_simplefb_fixed">分辨率在 VM 启动时固定，guest 内无法更改；修改后需重启 VM 生效。</string>
     <string name="create_vm_display_size_fmt">%1$d x %2$d</string>
     <string name="create_vm_display_rate_fmt">%1$d Hz</string>
     <string name="create_vm_display_custom">自定义…</string>
@@ -524,6 +537,8 @@
     <string name="license_detail_urls">链接</string>
 
     <string name="vm_daemon_error">与守护进程通信失败。</string>
+    <string name="vm_start_error_title">虚拟机启动失败</string>
+    <string name="vm_start_error_message">启动虚拟机时发生错误：%1$s（%2$s）</string>
     <string name="vm_compressed_disk_title">压缩的磁盘镜像</string>
     <string name="vm_compressed_disk_message">crosvm 无法读取压缩的 qcow2 镜像——启动时会出现磁盘 I/O 错误且找不到分区表。要先转换成非压缩再启动吗？\n%1$s</string>
     <string name="vm_compressed_disk_convert">转换并启动</string>
@@ -1671,4 +1686,48 @@
     <string name="usb_devices_action_failed_title">设备没有移动</string>
     <string name="usb_devices_target_claimed">被其他程序占用</string>
     <string name="usb_devices_idle_kept">%1$s 留在主机：有驱动不肯卸载，要拔掉重插才会回到 Idle</string>
+    <string name="settings_changelog_title">更新日志</string>
+    <string name="settings_changelog_summary">最近几天的 DroidVM 改动</string>
+    <string name="changelog_title">更新日志</string>
+    <string name="changelog_version">DroidVM v%1$s \u00b7 本地构建</string>
+    <string name="changelog_2026_11_25_title">2026-11-25 \u00b7 内存、磁盘与 Windows 3D</string>
+    <string name="changelog_2026_11_25_body">\u2022 磁盘压缩格式放开：新建/优化 qcow2 可选 Deflate (zlib) 与 Zstandard (zstd)，crosvm 两种压缩簇都能解压。\n\u2022 启动前内存预检：要求 MemAvailable ≥ 虚拟机内存 + 1.5 GB；不足时先丢缓存并等待最多 10 秒，减少 Gunyah MEM_ACCEPT 失败导致的黑屏。\n\u2022 大页修正：本机内核没有 hugetlbfs，不再传 --hugepages（此前会 MEM_ACCEPT 0x15）；gh_hugepage_reserve 未加载时自动使用普通内存。\n\u2022 新 crosvm：带 rutabaga reset 修复（上游 issue #99），16 KB 页对齐，反复启停更稳。\n\u2022 virglrenderer：修复 ResourceAttachBacking EINVAL（只影响开启 GPU 屏的配置）。\n\u2022 Windows 3D 结论：镜像自带 virtio-gpu 驱动从不发送 SET_SCANOUT；社区 build-43 在本机蓝屏 WHEA_UNCORRECTABLE_ERROR (0x124)。稳定用法 = 关闭 gpu-0，simplefb + VNC 5909。\n\u2022 宿主 GPU 链路（drm2kgsl / vrend / 回读 / VNC 呈现）已全部验证；要 3D 只能等 guest 驱动修复或改用 Linux guest。\n\u2022 首页运行环境卡：ROOT、虚拟化、大页池实时容量 +「释放大页/获取大页」；普通内存行和「释放内存」按钮已移除。本机决定 VM 能否启动的是大页池，不是 MemAvailable。\n\u2022 VM 列表：修复自动识别把“已挂载到别的 VM 的磁盘”当成新磁盘、会被自动建成一个 512 MB 的重复 VM、删掉后下次刷新又会出现的问题（此前只检查启动镜像，现在检查全部磁盘）。不完整的 VM 包导入也会被拒绝，启动时清理旧残留。\n\u2022 验证：zlib 压缩的 Windows 盘可启动到 Windows 11 桌面；同时挂 GXDE ISO + Windows 盘时，固件优先启动 ISO 的 GRUB。</string>
+    <string name="changelog_2026_11_23_title">2026-11-23 \u00b7 VM 启动与网络</string>
+    <string name="changelog_2026_11_23_body">\u2022 修复 Gunyah 内核模块不自动加载：启动前按 KMI 自动 insmod gunyah_host_share，避免 /dev/gunyah_share 缺失导致黑屏。\n\u2022 网络 helper 改走 su：解决 SELinux 拒绝 app uid 执行导致的 setupTaps failed，网络可正常启动。\n\u2022 修复 vulkan-system / vulkan-turnip 等连字符枚举解析，gfxstream 不再 SIGABRT。\n\u2022 启动失败时不再提前打开显示页，避免黑屏 Surface /“重连失败”。\n\u2022 大页预检尊重 hugepages=false，不再误报“大页内存不足”。</string>
+    <string name="changelog_2026_11_22_title">2026-11-22 \u00b7 Win11 启动与 VNC</string>
+    <string name="changelog_2026_11_22_body">\u2022 2048 MB Gunyah Win11 启动修复：启动前释放 gh_hugepage_reserve 池，避免不可移动页让 pin_user_pages_fast 卡在 compaction。\n\u2022 VNC 控制台改为直连 5909，不再等待 daemon 的 vm_vnc_info，显示恢复。\n\u2022 simplefb + VNC 绕过 virtio-gpu ResourceAttachBacking: EINVAL。\n\u2022 libtermux.so 改为 16 KB 页对齐，修复 Android 15+ 安装提示。</string>
+    <string name="changelog_footer">更新日志：docs/CHANGELOG.md\n上游：https://github.com/Droid-VM/DroidVM\n本分支：https://github.com/mf9593/DroidVM\n未完成 / 已知问题：TODO.md\n许可证：GPL-3.0-or-later + Additional Permissions</string>
+    <string name="settings_open_source_title">开源信息</string>
+    <string name="settings_open_source_summary">上游、修改记录与未完成事项</string>
+    <string name="settings_open_source_repo">本分支 GitHub</string>
+    <string name="settings_open_source_upstream">上游 DroidVM</string>
+    <string name="settings_open_source_changes">修改记录（FORK.md）</string>
+    <string name="settings_open_source_todo">未完成 / 已知问题（TODO.md）</string>
+    <string name="settings_open_source_changelog">更新日志（docs/CHANGELOG.md）</string>
+    <string name="home_runtime_title">运行环境</string>
+    <string name="home_runtime_root">ROOT</string>
+    <string name="home_runtime_virtualization">虚拟化</string>
+    <string name="home_root_unknown">检测中\u2026</string>
+    <string name="home_root_granted">已授权</string>
+    <string name="home_root_denied">未授权</string>
+    <string name="home_root_no_mode">无 ROOT 模式</string>
+    <string name="home_virt_none">未检测到</string>
+    <string name="home_virt_software">软件模拟</string>
+    <string name="home_virt_hardware">%1$s（硬件）</string>
+    <string name="logs_not_found_message_running">守护进程正在运行，但日志文件尚未生成。请启动一次 VM 或稍后重试。</string>
+    <string name="home_release_no_apps">已清理后台，当前可用 %1$s。剩余内存主要被系统或开发进程占用，无法安全强制停止。</string>
+    <string name="home_runtime_huge">大页池</string>
+    <string name="home_huge_value">可用 %1$s / 目标 %2$s</string>
+    <string name="home_huge_avail">可用 %1$s</string>
+    <string name="home_huge_none">未加载</string>
+    <string name="home_huge_release">释放大页</string>
+    <string name="home_huge_acquire">获取大页</string>
+    <string name="home_huge_release_running">释放中\u2026</string>
+    <string name="home_huge_acquire_running">获取中\u2026</string>
+    <string name="home_huge_release_done">大页池已释放</string>
+    <string name="home_huge_acquire_done">大页池当前可用 %1$s</string>
+    <string name="home_huge_vm_running">VM 正在运行，请先停止 VM 再修改大页池</string>
+    <string name="home_huge_unavailable">大页模块未加载</string>
+    <string name="home_huge_release_confirm_title">释放大页池？</string>
+    <string name="home_huge_release_confirm_msg">会把约 %1$s 的 2 MB 大页还给系统；下次启动 VM 前需要重新获取（或重启）。</string>
 </resources>

@@ -51,14 +51,17 @@ public final class UpdateDialog {
     }
 
     private void openDownload() {
-        var url = info.getPageUrl();
-        if (url.isEmpty()) url = info.getDownloadUrl();
+        // The GitHub release asset (first .apk) is the direct download; fall back to the
+        // release page when a release has no asset.
+        var url = info.getDownloadUrl();
+        if (url.isEmpty()) url = info.getPageUrl();
         if (!url.isEmpty()) goUrl(url);
     }
 
     private void openBrowser() {
-        var url = info.getDownloadUrl();
-        if (url.isEmpty()) url = info.getPageUrl();
+        // The human-readable release page, not the binary.
+        var url = info.getPageUrl();
+        if (url.isEmpty()) url = info.getDownloadUrl();
         if (!url.isEmpty()) goUrl(url);
     }
 }

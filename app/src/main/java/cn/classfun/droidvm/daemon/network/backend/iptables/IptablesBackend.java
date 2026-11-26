@@ -94,6 +94,10 @@ public final class IptablesBackend extends FirewallHelper {
 
     @Override
     public boolean initialize() {
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, "No-root mode: skipping iptables firewall initialization");
+            return false;
+        }
         Log.i(TAG, "Initializing iptables firewall chains");
         for (var def : DEFS)
             def.init(true);
@@ -115,6 +119,10 @@ public final class IptablesBackend extends FirewallHelper {
 
     @Override
     public boolean shutdown() {
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, "No-root mode: skipping iptables firewall shutdown");
+            return false;
+        }
         Log.i(TAG, "Shutting down iptables firewall chains");
         for (var def : DEFS)
             def.deinit();
@@ -122,12 +130,20 @@ public final class IptablesBackend extends FirewallHelper {
     }
 
     public void initNetwork(NetworkInstance inst) {
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, fmt("No-root mode: skipping iptables network init for %s", inst.getName()));
+            return;
+        }
         var net = new IptablesNetworkInstance(this, inst);
         net.init();
         net.initBasic();
     }
 
     public void deinitNetwork(NetworkInstance inst) {
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, fmt("No-root mode: skipping iptables network deinit for %s", inst.getName()));
+            return;
+        }
         var net = new IptablesNetworkInstance(this, inst);
         net.deinit();
     }
@@ -136,6 +152,7 @@ public final class IptablesBackend extends FirewallHelper {
     public void addLiveV6Subnet(
         @NonNull NetworkInstance inst, @NonNull String dev, @NonNull IPv6Network net
     ) {
+        if (RunUtils.isNoRootMode()) return;
         new IptablesNetworkInstance(this, inst).addLiveV6Subnet(dev, net);
     }
 
@@ -143,6 +160,7 @@ public final class IptablesBackend extends FirewallHelper {
     public void removeLiveV6Subnet(
         @NonNull NetworkInstance inst, @NonNull String dev, @NonNull IPv6Network net
     ) {
+        if (RunUtils.isNoRootMode()) return;
         new IptablesNetworkInstance(this, inst).removeLiveV6Subnet(dev, net);
     }
 
@@ -151,6 +169,7 @@ public final class IptablesBackend extends FirewallHelper {
         @NonNull String bridge, @NonNull String guestIp, @NonNull String protocol,
         int guestStart, int guestEnd, @Nullable String hairpinSubnet
     ) {
+        if (RunUtils.isNoRootMode()) return false;
         var fwd = new ChainInfo(this, "filter", null, fmt("droidvm_fwd_%s", bridge));
         boolean ok = fwd.insert(fwdSpec(bridge, guestIp, protocol, guestStart, guestEnd));
         if (hairpinSubnet != null) {
@@ -168,6 +187,7 @@ public final class IptablesBackend extends FirewallHelper {
         @NonNull String bridge, @NonNull String guestIp, @NonNull String protocol,
         int guestStart, int guestEnd, @Nullable String hairpinSubnet
     ) {
+        if (RunUtils.isNoRootMode()) return false;
         var fwd = new ChainInfo(this, "filter", null, fmt("droidvm_fwd_%s", bridge));
         boolean ok = fwd.delete(fwdSpec(bridge, guestIp, protocol, guestStart, guestEnd));
         if (hairpinSubnet != null) {
@@ -185,6 +205,7 @@ public final class IptablesBackend extends FirewallHelper {
         @NonNull String bridge, @NonNull String guestIp, @NonNull String protocol,
         @NonNull String hostIp, int hostStart, int hostEnd, int guestStart, int guestEnd
     ) {
+        if (RunUtils.isNoRootMode()) return false;
         var pre = new ChainInfo(this, "nat", null, fmt("droidvm_pre_%s", bridge));
         boolean ok = pre.append(
             dnatSpec(protocol, hostIp, hostStart, hostEnd, guestIp, guestStart, guestEnd));
@@ -199,6 +220,7 @@ public final class IptablesBackend extends FirewallHelper {
         @NonNull String bridge, @NonNull String guestIp, @NonNull String protocol,
         @NonNull String hostIp, int hostStart, int hostEnd, int guestStart, int guestEnd
     ) {
+        if (RunUtils.isNoRootMode()) return false;
         var pre = new ChainInfo(this, "nat", null, fmt("droidvm_pre_%s", bridge));
         boolean ok = pre.delete(
             dnatSpec(protocol, hostIp, hostStart, hostEnd, guestIp, guestStart, guestEnd));
@@ -273,6 +295,10 @@ public final class IptablesBackend extends FirewallHelper {
     }
 
     private boolean enableIpForward() {
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, "No-root mode: skipping IP forwarding");
+            return false;
+        }
         Log.i(TAG, "Enabling IP forwarding");
         var result = RunUtils.run("echo 1 > /proc/sys/net/ipv4/ip_forward");
         RunUtils.run("echo 1 > /proc/sys/net/ipv6/conf/all/forwarding");

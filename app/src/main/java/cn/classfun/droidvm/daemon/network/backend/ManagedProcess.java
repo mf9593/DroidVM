@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 import cn.classfun.droidvm.lib.natives.NativeProcess;
 import cn.classfun.droidvm.lib.utils.ProcessUtils;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 
 /**
  * Supervises one external helper daemon (dnsmasq, gvswitch, pbridge):
@@ -71,7 +72,22 @@ public class ManagedProcess {
         NativeProcess proc;
         try {
             exitCode = -1;
-            proc = new NativeProcess.Builder(args.toArray(new String[0])).start();
+            // The daemon is in-process (app uid, untrusted_app), where SELinux refuses to exec
+            // a binary under app_data_file: netbox/gvswitch/pbridge/bridgedhcp all died with
+            // EACCES before their first instruction, which is why every VM with a NIC failed at
+            // setupTaps. crosvm already goes through su; the helpers have to as well.
+            // `su -c "umask 000; exec <argv>"` keeps the stdio pipes, lets the shell exec in
+            // place so the pid NativeProcess watches (and stop() kills) is the helper itself,
+            // and makes the unix sockets / state files the helpers create reachable from the
+            // app-uid daemon (a root process with umask 022 binds them 0755 root:root, which
+            // the daemon cannot connect to).
+            var argv = args;
+            if (!RunUtils.isNoRootMode() && android.os.Process.myUid() != 0) {
+                var cmd = new StringBuilder("umask 000; exec");
+                for (var a : args) cmd.append(' ').append(RunUtils.escapedString(a));
+                argv = List.of("/system/bin/su", "-c", cmd.toString());
+            }
+            proc = new NativeProcess.Builder(argv.toArray(new String[0])).start();
         } catch (Exception e) {
             Log.e(logTag, "Failed to start process", e);
             process = null;

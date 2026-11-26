@@ -102,6 +102,11 @@ public final class KernelModulePreflight {
     public static List<Missing> check(@NonNull Context ctx, @NonNull DataItem item) {
         var wanted = wantedBy(item);
         if (!ProtectedVM.supportsPseudoUnprotected(item)) wanted.remove(GUNYAH_HOST_SHARE);
+        // gunyah_host_share is no longer a question for the user: the daemon loads it itself,
+        // right before it spawns crosvm, when the configuration needs /dev/gunyah_share (see
+        // CrosvmBackendInstance.ensureGunyahShareModule). Prompting here would put a dialog in
+        // front of a start whose next step is loading the very module it is asking about.
+        wanted.remove(GUNYAH_HOST_SHARE);
         if (wanted.isEmpty()) return List.of();
 
         var modules = KernelModuleManager.list(ctx);

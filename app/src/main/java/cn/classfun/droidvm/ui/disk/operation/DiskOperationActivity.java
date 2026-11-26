@@ -438,9 +438,9 @@ public final class DiskOperationActivity extends AppCompatActivity {
     }
 
     private void startTerminalSession(String cmd) {
-        var shell = findExecute("su", "/system/bin/su");
+        var shell = RunUtils.isNoRootMode() ? "/system/bin/sh" : findExecute("su", "/system/bin/su");
         var cwd = getFilesDir().getAbsolutePath();
-        var args = new String[]{"su", "-c", cmd};
+        var args = RunUtils.isNoRootMode() ? new String[]{"-c", cmd} : new String[]{"su", "-c", cmd};
         var env = new String[]{
             "TERM=xterm-256color",
             "PATH=/system/bin",

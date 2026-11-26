@@ -24,12 +24,19 @@ import com.topjohnwu.superuser.internal.MainShell;
 import cn.classfun.droidvm.R;
 import cn.classfun.droidvm.ui.setup.SetupActivity;
 import cn.classfun.droidvm.ui.setup.base.BaseCheckStepFragment;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 
 public final class RootStepFragment extends BaseCheckStepFragment {
     private static final String TAG = "RootStepFragment";
 
     public RootStepFragment(SetupActivity activity) {
         this.activity = activity;
+    }
+
+    /** In no-root mode, the root step is hidden from the wizard. */
+    @Override
+    public boolean isHiddenStep() {
+        return RunUtils.isNoRootMode();
     }
 
     @Nullable

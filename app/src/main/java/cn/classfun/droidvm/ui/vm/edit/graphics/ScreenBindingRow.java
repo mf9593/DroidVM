@@ -166,6 +166,10 @@ final class ScreenBindingRow {
             ? VMScreenConfig.DEFAULT_REFRESH_RATE : VMScreenConfig.NEW_VM_DEFAULT_POLL_HZ);
         tilRate.setHint(block.getContext().getString(rateHint()));
         dpiOptions.setVisibility(gpuScreen ? VISIBLE : GONE);
+        // The framebuffer has one fixed size for the life of the VM; saying so here is the only
+        // place a user would look after finding no other modes inside the guest.
+        block.findViewById(R.id.tv_screen_resolution_note)
+            .setVisibility(gpuScreen ? GONE : VISIBLE);
     }
 
     /**

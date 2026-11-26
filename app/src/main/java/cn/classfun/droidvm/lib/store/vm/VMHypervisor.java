@@ -4,6 +4,7 @@
 package cn.classfun.droidvm.lib.store.vm;
 
 import static cn.classfun.droidvm.lib.utils.FileUtils.shellCheckExists;
+import static cn.classfun.droidvm.lib.utils.RunUtils.runQuiet;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -49,7 +50,15 @@ public enum VMHypervisor implements StringEnum {
     }
 
     public boolean isSupported() {
-        return devicePath == null || shellCheckExists(devicePath);
+        if (devicePath == null) return true;
+        // /dev/gunyah is blocked by SELinux for app users (stat() returns EACCES),
+        // but gunyah HWC works from userspace via HVC instructions (EL0).
+        // Fall back to checking if the CPU is a Qualcomm Snapdragon with gunyah support.
+        if (this == GUNYAH && !shellCheckExists(devicePath)) {
+            var cpuInfo = runQuiet("cat /proc/cpuinfo").getOutString();
+            return cpuInfo.contains("CPU implementer\t: 0x51"); // Qualcomm
+        }
+        return shellCheckExists(devicePath);
     }
 
     public static boolean isBackendSupported(VMBackend backend, VMHypervisor hypervisor) {

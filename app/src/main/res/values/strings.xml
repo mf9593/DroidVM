@@ -94,6 +94,18 @@
     <string name="home_card_wizard_title">Create Wizard</string>
     <string name="home_card_import_title">Import VM</string>
     <string name="home_card_sysinfo_kernel">Kernel Version</string>
+    <string name="home_card_mem_hint">VM start needs \u2265 3.5 GB</string>
+    <string name="home_card_mem_hint_low">Low. VM start may fail</string>
+    <string name="home_release_memory">Free memory</string>
+    <string name="home_release_running">Freeing\u2026</string>
+    <string name="home_release_done">Freed %1$s \u00b7 %2$s available</string>
+    <string name="home_release_need_root">Root is required to free memory</string>
+    <string name="home_release_low_title">Still low on memory</string>
+    <string name="home_release_low_msg">Freed %1$s, %2$s available now. Force-stopping the checked apps frees more; they will be closed.</string>
+    <string name="home_release_force_stop">Force stop</string>
+    <string name="home_release_deep_done">Stopped %1$d apps \u00b7 %2$s available</string>
+    <string name="home_release_app_item">%1$s \u00b7 %2$s</string>
+    <string name="home_card_sysinfo_mem">Available Memory</string>
     <string name="home_card_sysinfo_soc">SoC Model</string>
     <string name="home_card_help_title">Help &amp; Documentation</string>
     <string name="home_card_feedback_title">Report Issue</string>
@@ -309,6 +321,8 @@
     <string name="create_vm_display_refresh_rate">Rate (Hz)</string>
     <string name="create_vm_display_poll_hz">Poll (Hz)</string>
     <string name="create_vm_display_resolution">Resolution</string>
+    <!-- Shown under the simplefb screen's size menu: that device is a fixed linear framebuffer, so its size is a command-line value rather than a mode the guest can change. -->
+    <string name="create_vm_display_simplefb_fixed">Fixed when the VM starts: the guest cannot change this mode. Restart the VM after changing it.</string>
     <string name="create_vm_display_size_fmt">%1$d x %2$d</string>
     <string name="create_vm_display_rate_fmt">%1$d Hz</string>
     <string name="create_vm_display_custom">Custom...</string>
@@ -561,6 +575,8 @@
     <string name="key_pause" translatable="false">PAUSE</string>
 
     <string name="vm_daemon_error">Failed to communicate with daemon.</string>
+    <string name="vm_start_error_title">VM Start Failed</string>
+    <string name="vm_start_error_message">An error occurred while starting the VM: %1$s (%2$s)</string>
     <string name="vm_compressed_disk_title">Compressed disk image</string>
     <string name="vm_compressed_disk_message">crosvm can\'t read compressed qcow2 images -- the VM would boot to disk I/O errors with no partition table. Convert it to uncompressed and start?\n%1$s</string>
     <string name="vm_compressed_disk_convert">Convert &amp; start</string>
@@ -1729,4 +1745,48 @@
     <!-- U+1F512, as an entity: the base file stays ASCII (scripts/ci/check_ascii.py). -->
     <string name="usb_devices_locked_fmt" translatable="false">&#128274; %1$s</string>
     <string name="usb_devices_idle_kept">%1$s stays with the host: a driver of its would not let go, so it goes idle only when it is unplugged</string>
+    <string name="settings_changelog_title">Changelog</string>
+    <string name="settings_changelog_summary">Recent DroidVM changes</string>
+    <string name="changelog_title">Changelog</string>
+    <string name="changelog_version">DroidVM v%1$s \u00b7 local build</string>
+    <string name="changelog_2026_11_25_title">2026-11-25 \u00b7 Memory, disks and Windows 3D</string>
+    <string name="changelog_2026_11_25_body">\u2022 Disk compression unlocked: new or optimized qcow2 disks can use Deflate (zlib) or Zstandard (zstd); crosvm can decompress both.\n\u2022 Pre-start memory check: requires MemAvailable &gt;= guest RAM + 1.5 GB; otherwise it drops caches and waits up to 10 s, reducing Gunyah MEM_ACCEPT failures and black screens.\n\u2022 Hugepage fix: this kernel has no hugetlbfs, so --hugepages is no longer passed (it used to end in MEM_ACCEPT 0x15); without gh_hugepage_reserve the VM uses ordinary memory.\n\u2022 New crosvm: carries the rutabaga reset fix (upstream issue #99) and is 16 KB-page aligned; repeated starts are more reliable.\n\u2022 virglrenderer: ResourceAttachBacking EINVAL fixed (only affects configurations with the GPU screen enabled).\n\u2022 Windows 3D conclusion: the built-in virtio-gpu driver never sends SET_SCANOUT; community build-43 BSODs this device with WHEA_UNCORRECTABLE_ERROR (0x124). Stable setup = gpu-0 off, simplefb + VNC 5909.\n\u2022 Host GPU path (drm2kgsl / vrend / readback / VNC present) is fully verified; 3D needs a guest-driver fix or a Linux guest.\n\u2022 Home runtime card: ROOT, virtualization and the live huge-page pool, with Release/Acquire huge pages buttons; the ordinary-RAM row and the Free memory button are gone. On this device the huge-page pool, not MemAvailable, gates a VM start.\n\u2022 VM list: fixed auto-detect creating a 512 MB duplicate for a disk that is already attached to another VM (it only checked the boot image; now every disk is checked). A partial VM package import is rejected too, and startup cleans old leftovers.\n\u2022 Verified: the zlib-compressed Windows disk boots to the Windows 11 desktop, and a VM with the GXDE ISO plus the Windows disk boots the ISO GRUB menu.</string>
+    <string name="changelog_2026_11_23_title">2026-11-23 \u00b7 VM start and networking</string>
+    <string name="changelog_2026_11_23_body">\u2022 Gunyah modules now load automatically: gunyah_host_share is insmod for the running KMI before start, so /dev/gunyah_share is no longer missing (black screen).\n\u2022 Network helpers now run through su: fixes setupTaps failed when SELinux denied executing them as the app uid.\n\u2022 Fixed enum parsing for hyphenated values such as vulkan-system and vulkan-turnip; gfxstream no longer aborts with SIGABRT.\n\u2022 The display page is no longer opened before the VM is actually running, avoiding a black Surface and reconnect failures.\n\u2022 Hugepage preflight now honours hugepages=false and stops reporting a false not-enough-huge-pages error.</string>
+    <string name="changelog_2026_11_22_title">2026-11-22 \u00b7 Win11 start and VNC</string>
+    <string name="changelog_2026_11_22_body">\u2022 2048 MB Gunyah Win11 start fix: release the gh_hugepage_reserve pool before boot; its unmovable pages made pin_user_pages_fast stall in compaction.\n\u2022 VNC console connects straight to 5909 instead of waiting for the daemon vm_vnc_info; display recovers.\n\u2022 simplefb + VNC bypasses virtio-gpu ResourceAttachBacking: EINVAL.\n\u2022 libtermux.so rebuilt for 16 KB pages, fixing the Android 15+ install warning.</string>
+    <string name="changelog_footer">Changelog: docs/CHANGELOG.md\nUpstream: https://github.com/Droid-VM/DroidVM\nThis fork: https://github.com/mf9593/DroidVM\nUnfinished / known issues: TODO.md\nLicense: GPL-3.0-or-later + additional permissions</string>
+    <string name="settings_open_source_title">Open source</string>
+    <string name="settings_open_source_summary">Upstream, changes and unfinished work</string>
+    <string name="settings_open_source_repo">This fork on GitHub</string>
+    <string name="settings_open_source_upstream">Upstream DroidVM</string>
+    <string name="settings_open_source_changes">Modification record (FORK.md)</string>
+    <string name="settings_open_source_todo">Unfinished / known issues (TODO.md)</string>
+    <string name="settings_open_source_changelog">Changelog (docs/CHANGELOG.md)</string>
+    <string name="home_runtime_title">Runtime</string>
+    <string name="home_runtime_root">ROOT</string>
+    <string name="home_runtime_virtualization">Virtualization</string>
+    <string name="home_root_unknown">Checking\u2026</string>
+    <string name="home_root_granted">Granted</string>
+    <string name="home_root_denied">Not granted</string>
+    <string name="home_root_no_mode">No-root mode</string>
+    <string name="home_virt_none">Not detected</string>
+    <string name="home_virt_software">Software emulation</string>
+    <string name="home_virt_hardware">%1$s (hardware)</string>
+    <string name="logs_not_found_message_running">The daemon is running, but no log file has been written yet. Start a VM or try again later.</string>
+    <string name="home_release_no_apps">Background apps were cleared; %1$s available. The remaining memory is held by system or development processes that cannot be force-stopped safely.</string>
+    <string name="home_runtime_huge">Huge-page pool</string>
+    <string name="home_huge_value">Avail %1$s / target %2$s</string>
+    <string name="home_huge_avail">Avail %1$s</string>
+    <string name="home_huge_none">Not loaded</string>
+    <string name="home_huge_release">Release huge pages</string>
+    <string name="home_huge_acquire">Acquire huge pages</string>
+    <string name="home_huge_release_running">Releasing\u2026</string>
+    <string name="home_huge_acquire_running">Acquiring\u2026</string>
+    <string name="home_huge_release_done">Huge-page pool released</string>
+    <string name="home_huge_acquire_done">Huge-page pool: %1$s available</string>
+    <string name="home_huge_vm_running">A VM is running; stop it before changing the huge-page pool</string>
+    <string name="home_huge_unavailable">The huge-page module is not loaded</string>
+    <string name="home_huge_release_confirm_title">Release the huge-page pool?</string>
+    <string name="home_huge_release_confirm_msg">This returns about %1$s of 2 MB pages to the system. You will need to acquire them again (or reboot) before starting the next VM.</string>
 </resources>

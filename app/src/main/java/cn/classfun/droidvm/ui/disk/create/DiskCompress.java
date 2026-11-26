@@ -22,12 +22,21 @@ public enum DiskCompress implements StringEnum {
     ZSTD(R.string.disk_create_compress_zstd);
 
     /**
-     * qcow2 compression the crosvm backend can read. Currently only uncompressed images boot;
-     * when crosvm grows zlib (and later zstd) support, extend this set and every consumer -
-     * the post-import optimize skip and the pre-start convert prompt - follows.
+     * qcow2 compression the crosvm backend can read.
+     *
+     * <p>All three are readable now. crosvm's qcow reader grew a decompressing path for both
+     * compression types the format defines -- 0 = raw DEFLATE (flate2 with the pure-Rust zlib-rs
+     * backend) and 1 = zstd (libzstd) -- with a parallel per-read decompressor and a bounded LRU of
+     * decompressed clusters (disk/src/qcow/mod.rs). The earlier gate to NONE predates that and
+     * said so in its own comment ("when crosvm grows zlib (and later zstd) support, extend this
+     * set"), which is what this is.
+     *
+     * <p>Consumers follow this set: the create dialog's compression row, the post-import optimize
+     * skip, and the pre-start convert prompt. A disk compressed here therefore only needs a
+     * crosvm that has the qcow feature, which the shipped one does.
      */
     public static final Set<DiskCompress> CROSVM_SUPPORTED =
-        Collections.unmodifiableSet(EnumSet.of(NONE));
+        Collections.unmodifiableSet(EnumSet.of(NONE, DEFLATE, ZSTD));
 
     private final @StringRes int stringId;
 

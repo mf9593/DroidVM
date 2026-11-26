@@ -504,7 +504,9 @@ public final class VMVncDisplayActivity extends BaseVncActivity {
             boolean fullscreen = chrome != null && chrome.isFullscreen();
             int top = fullscreen ? 0 : sysBars.top;
             int bottom = Math.max(fullscreen ? 0 : sysBars.bottom, ime.bottom);
-            v.setPadding(0, top, 0, bottom);
+            int left = fullscreen ? 0 : sysBars.left;
+            int right = fullscreen ? 0 : sysBars.right;
+            v.setPadding(left, top, right, bottom);
             return insets;
         });
         ViewCompat.requestApplyInsets(content);

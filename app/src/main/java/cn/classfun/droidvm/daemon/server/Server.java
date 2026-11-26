@@ -14,6 +14,8 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import cn.classfun.droidvm.daemon.Daemon;
+
 import org.json.JSONObject;
 
 import java.io.File;
@@ -99,7 +101,7 @@ public final class Server {
         ServerSocket serverSocket;
         InetSocketAddress sockAddr;
         try {
-            var addr = InetAddress.getLocalHost();
+            var addr = InetAddress.getByName("127.0.0.1");
             var port = generateRandomAvailablePort();
             if (port < 0) {
                 Log.e(TAG, "Failed to find an available port");
@@ -109,24 +111,35 @@ public final class Server {
             serverSocket = new ServerSocket();
             serverSocket.setReuseAddress(true);
             serverSocket.bind(sockAddr);
+            Daemon.debugLog("Server socket bound on " + sockAddr);
         } catch (Exception e) {
+            Daemon.debugLog("Server socket failed: " + e);
             Log.e(TAG, "Failed to start server socket", e);
             return;
         }
         writePortFile(sockAddr.getPort());
-        // Only now, with the port file written and a listener up. Auto-start waits on the
-        // huge-page reserve, and holding the daemon's whole reason for existing behind VMs that
-        // have not booted yet is what it used to do from the ServerContext constructor. By here
-        // the event callback is wired (our own constructor) and INT/TERM have handlers (Daemon's
-        // main, before this call), so the sweep's VMs report their states and a shutdown arriving
-        // mid-sweep is answered rather than ignored.
-        context.getVMs().autoUpAsync();
+        Daemon.debugLog("Port file written, port=" + sockAddr.getPort());
+        // Set running=true and start accept loop BEFORE autoUpAsync so connections
+        // aren't blocked while VMs are being auto-started.
+        runningThread = Thread.currentThread();
+        running = true;
+        Daemon.debugLog("Server running, accepting connections on " + sockAddr);
+        // Auto-start VMs in a separate thread so the accept loop is never blocked.
+        Thread autoUpThread = new Thread(() -> {
+            try {
+                context.getVMs().autoUpAsync();
+            } catch (Exception e) {
+                Daemon.debugLog("autoUpAsync failed: " + e);
+                Log.w(TAG, "autoUpAsync failed", e);
+            }
+        }, "DaemonAutoUp");
+        autoUpThread.setDaemon(true);
+        autoUpThread.start();
         try {
             Log.d(TAG, fmt("DroidVM Daemon is listening on %s", sockAddr.toString()));
-            runningThread = Thread.currentThread();
-            running = true;
             while (running) try {
                 var client = serverSocket.accept();
+                Daemon.debugLog("Accepted client connection from " + client.getRemoteSocketAddress());
                 Log.d(TAG, "Accepted new client connection");
                 runOnPool(() -> handleClient(client));
                 Thread.sleep(0);

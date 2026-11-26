@@ -27,7 +27,6 @@ import androidx.core.view.ViewCompat;
 import androidx.fragment.app.FragmentManager;
 
 import com.google.android.material.appbar.AppBarLayout;
-import com.google.android.material.appbar.CollapsingToolbarLayout;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -50,7 +49,6 @@ public final class MainActivity extends SwipeableTabActivity {
     private static final String KEY_ACTIVE = "active_tag";
     private static final String KEY_HIDE_TEST_WARNING = "hide_test_warning";
     private FloatingActionButton fab;
-    private CollapsingToolbarLayout collapsingToolbar;
     private AppBarLayout appBarLayout;
     private DaemonHelper daemon;
     private FragmentManager fm;
@@ -80,13 +78,33 @@ public final class MainActivity extends SwipeableTabActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Enable edge-to-edge so content extends behind the navigation bar
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         toolbar = findViewById(R.id.toolbar);
-        collapsingToolbar = findViewById(R.id.collapsing_toolbar);
         appBarLayout = findViewById(R.id.app_bar);
         fab = findViewById(R.id.fab_add);
         bottomNav = findViewById(R.id.bottom_nav);
+        // Apply navigation bar inset to bottom nav so it sits flush with the system bar
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(bottomNav, (v, insets) -> {
+            var navBar = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars());
+            v.setPadding(v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(), navBar.bottom);
+            return insets;
+        });
+        // The bottom navigation is an overlay in the CoordinatorLayout. Give the fragment host
+        // the nav's measured height (which already includes the system bar inset) so scrollable
+        // pages end above it instead of hiding their last card behind it.
+        var mainContainer = findViewById(R.id.main_container);
+        bottomNav.addOnLayoutChangeListener((v, left, top, right, bottom,
+                                             oldLeft, oldTop, oldRight, oldBottom) -> {
+            int height = bottom - top;
+            if (height <= 0) return;
+            if (mainContainer.getPaddingBottom() != height) {
+                mainContainer.setPadding(mainContainer.getPaddingLeft(),
+                    mainContainer.getPaddingTop(), mainContainer.getPaddingRight(), height);
+            }
+        });
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -129,7 +147,7 @@ public final class MainActivity extends SwipeableTabActivity {
             activeFragment = newFragId;
         }
         var curFragment = getFragment(activeFragment);
-        collapsingToolbar.setTitle(getString(curFragment.getTitleResId()));
+        toolbar.setTitle(getString(curFragment.getTitleResId()));
         isSwipeSwitching = true;
         bottomNav.setSelectedItemId(activeFragment.getNavId());
         isSwipeSwitching = false;
@@ -169,7 +187,7 @@ public final class MainActivity extends SwipeableTabActivity {
         }
         var curFragment = getFragment(activeFragment);
         bottomNav.setSelectedItemId(activeFragment.getNavId());
-        collapsingToolbar.setTitle(getString(curFragment.getTitleResId()));
+        toolbar.setTitle(getString(curFragment.getTitleResId()));
         updateFab(curFragment.isShowFab());
         bottomNav.setOnItemSelectedListener(this::bottomNavOnItemSelected);
         findViewById(R.id.main_container).post(() ->
@@ -183,7 +201,7 @@ public final class MainActivity extends SwipeableTabActivity {
         var id = MainFragmentEnum.fromNavId(item.getItemId());
         if (id == null) return false;
         var target = getFragment(id);
-        collapsingToolbar.setTitle(getString(target.getTitleResId()));
+        toolbar.setTitle(getString(target.getTitleResId()));
         appBarLayout.setExpanded(true, true);
         updateFab(target.isShowFab());
         if (isSwipeSwitching) return true;

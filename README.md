@@ -4,6 +4,11 @@
 
 [简体中文](README.zh.md) | [English](README.md)
 
+> **Fork notice:** This repository is a fork of [Droid-VM/DroidVM](https://github.com/Droid-VM/DroidVM),
+> maintained at [mf9593/DroidVM](https://github.com/mf9593/DroidVM). The in-app update check reads
+> this fork's GitHub Releases. See [FORK.md](FORK.md), [TODO.md](TODO.md) and the
+> [changelog](docs/CHANGELOG.md).
+
 An Android virtual machine manager with support for multiple hypervisors, including Qualcomm Gunyah, MediaTek GenieZone, and Linux KVM.
 
 Supported hypervisors:
@@ -16,9 +21,10 @@ Create and manage lightweight VMs directly on your device with near-native perfo
 
 ## Resources
 
-- [Repository](https://github.com/Droid-VM/DroidVM)
-- [Wiki](https://github.com/Droid-VM/DroidVM/wiki)
-- [Releases](https://github.com/Droid-VM/DroidVM/releases)
+- [This fork](https://github.com/mf9593/DroidVM)
+- [Fork releases](https://github.com/mf9593/DroidVM/releases)
+- [Upstream](https://github.com/Droid-VM/DroidVM)
+- [Fork notes](FORK.md) · [Unfinished work](TODO.md) · [Changelog](docs/CHANGELOG.md)
 
 ## Features
 

@@ -77,21 +77,58 @@ public final class UplinkResolver {
     private static List<Iface> scan() {
         var out = new ArrayList<Iface>();
         var entries = new File("/sys/class/net").listFiles();
-        if (entries == null) return out;
-        for (var entry : entries) {
-            var name = entry.getName();
-            if (name.equals("lo")) continue;
-            if (new File(entry, "bridge").exists()) continue;    // a bridge
-            if (new File(entry, "tun_flags").exists()) continue; // tun/tap
-            boolean wireless = new File(entry, "phy80211").exists()
-                || new File(entry, "wireless").exists();
-            boolean physical = new File(entry, "device").exists();
-            boolean ether = readInt(new File(entry, "type")) == ARPHRD_ETHER;
-            // leaf = not stacked on another netdev (drops veth/vlan/rmnet_data@...)
-            boolean leaf = readInt(new File(entry, "ifindex"))
-                == readInt(new File(entry, "iflink"));
-            out.add(new Iface(name, wireless, isUp(entry), ether,
-                physical, leaf, isVirtualDevtype(entry)));
+        if (entries != null) {
+            for (var entry : entries) {
+                var name = entry.getName();
+                if (name.equals("lo")) continue;
+                if (new File(entry, "bridge").exists()) continue;    // a bridge
+                if (new File(entry, "tun_flags").exists()) continue; // tun/tap
+                boolean wireless = new File(entry, "phy80211").exists()
+                    || new File(entry, "wireless").exists();
+                boolean physical = new File(entry, "device").exists();
+                boolean ether = readInt(new File(entry, "type")) == ARPHRD_ETHER;
+                // leaf = not stacked on another netdev (drops veth/vlan/rmnet_data@...)
+                boolean leaf = readInt(new File(entry, "ifindex"))
+                    == readInt(new File(entry, "iflink"));
+                out.add(new Iface(name, wireless, isUp(entry), ether,
+                    physical, leaf, isVirtualDevtype(entry)));
+            }
+        }
+        // Some ROMs deny untrusted_app search/read on /sys/class/net (sysfs_net), so the
+        // listFiles() above returns null and the picker offered nothing -- which also made the
+        // L2 uplink unresolvable ("Uplink WiFi not found"). Ask netbox (root) instead.
+        if (out.isEmpty()) return scanNetbox();
+        return out;
+    }
+
+    /**
+     * Interface list from {@code netbox link-list}, for hosts where the app may not read
+     * {@code /sys/class/net}.
+     *
+     * <p>netbox reports ifname/kind/operstate/master, which is enough for the three labels:
+     * a kernel bridge/tun/tap/vlan/dummy/ifb is skipped (kind), cellular rmnet and IP tunnels
+     * are not L2 and are skipped by name, and a {@code wlan*} link is the Wi-Fi station.</p>
+     */
+    @NonNull
+    private static List<Iface> scanNetbox() {
+        var out = new ArrayList<Iface>();
+        var arr = Netbox.linkList();
+        for (int i = 0; i < arr.length(); i++) {
+            var o = arr.optJSONObject(i);
+            if (o == null) continue;
+            var name = o.optString("ifname", "");
+            if (name.isEmpty() || name.equals("lo")) continue;
+            if (!o.optString("kind", "").isEmpty()) continue;
+            if (name.startsWith("rmnet") || name.startsWith("r_rmnet")
+                || name.startsWith("ccmni") || name.startsWith("ip6")
+                || name.startsWith("gre") || name.startsWith("erspan")
+                || name.startsWith("sit") || name.startsWith("tunl"))
+                continue;
+            var state = o.optString("operstate", "");
+            boolean up = state.equalsIgnoreCase("up") || state.equalsIgnoreCase("unknown");
+            boolean wireless = name.startsWith("wlan");
+            boolean leaf = o.optString("master", "").isEmpty();
+            out.add(new Iface(name, wireless, up, true, true, leaf, false));
         }
         return out;
     }
@@ -191,7 +228,8 @@ public final class UplinkResolver {
         if (configured.equalsIgnoreCase(ID_WIFI)) return resolveWifi();
         if (configured.equalsIgnoreCase(ID_ETHERNET)) return resolveEthernet();
         if (configured.equalsIgnoreCase(ID_TETHERING)) return resolveTethering();
-        if (new File(fmt("/sys/class/net/%s/uevent", configured)).exists())
+        // Literal interface name: ask netbox, not sysfs (the app may not be allowed to read it).
+        if (Netbox.linkExists(configured))
             return configured;
         Log.w(TAG, fmt("Uplink interface not found: %s", configured));
         return null;

@@ -23,6 +23,21 @@ public final class Enums {
         tv.setTextColor(val.getDisplayColor(ctx).toArgb());
     }
 
+    /**
+     * Upper-cases a stored value into an enum constant name.
+     *
+     * <p>Persisted values come from {@link StringEnum#getName()} for some enums
+     * ({@code vulkan-system}) and from {@code name()} for others ({@code VULKAN_SYSTEM}); the
+     * former are hyphenated. {@code Enum.valueOf} only knows underscores, so without this the
+     * hyphenated spellings silently fell back to the default -- which is how a stored
+     * {@code gpu_api=vulkan-system} turned into {@code NONE} and the daemon went back to the
+     * bundled turnip, aborting the VM in gfxstream when the host GPU has no turnip support.</p>
+     */
+    @NonNull
+    private static String enumKey(@NonNull String str) {
+        return str.trim().replace('-', '_').toUpperCase();
+    }
+
     public static <E extends Enum<E>> E optEnum(
         @NonNull JSONObject jo,
         @NonNull String key,
@@ -32,7 +47,7 @@ public final class Enums {
         try {
             return Enum.valueOf(
                 def.getDeclaringClass(),
-                str.toUpperCase()
+                enumKey(str)
             );
         } catch (IllegalArgumentException e) {
             return def;
@@ -48,7 +63,7 @@ public final class Enums {
         try {
             return Enum.valueOf(
                 def.getDeclaringClass(),
-                str.toUpperCase()
+                enumKey(str)
             );
         } catch (IllegalArgumentException e) {
             return def;

@@ -87,6 +87,22 @@
 
         </LinearLayout>
 
+        <!-- simplefb only: its size is a fixed block of memory rather than a display mode, so
+             the guest has no other mode to switch to. The row above still edits it; this says
+             when the edit takes effect and why the guest's own settings will not offer it. -->
+        <TextView
+            android:id="@+id/tv_screen_resolution_note"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="8dp"
+            android:text="@string/create_vm_display_simplefb_fixed"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
         <LinearLayout
             android:id="@+id/screen_dpi_options"
             android:layout_width="match_parent"

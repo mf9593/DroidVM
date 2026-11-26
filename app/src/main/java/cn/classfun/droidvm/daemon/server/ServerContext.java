@@ -27,6 +27,7 @@ import cn.classfun.droidvm.daemon.vm.VMInstanceStore;
 import cn.classfun.droidvm.daemon.vm.pkg.VMExportTask;
 import cn.classfun.droidvm.daemon.vm.pkg.VMImportTask;
 import cn.classfun.droidvm.lib.store.base.DataItem;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 
 public final class ServerContext {
     private static final String TAG = "ServerContext";
@@ -61,12 +62,16 @@ public final class ServerContext {
         // children are orphaned, not killed. Reap any left over from a previous
         // daemon before we start fresh and auto-up. VM backends are matched by
         // their full prebuilt path so unrelated processes are never hit.
-        run("pkill dnsmasq");
-        run("pkill gvswitch");
-        run("pkill pbridge");
-        run("pkill netbox");
-        run("pkill -f %s", getPrebuiltBinaryPath("crosvm"));
-        run("pkill -f %s", getPrebuiltBinaryPath("qemu-system-aarch64"));
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, "No-root mode: skipping process cleanup");
+        } else {
+            run("pkill dnsmasq");
+            run("pkill gvswitch");
+            run("pkill pbridge");
+            run("pkill netbox");
+            run("pkill -f %s", getPrebuiltBinaryPath("crosvm"));
+            run("pkill -f %s", getPrebuiltBinaryPath("qemu-system-aarch64"));
+        }
         try {
             networks.firewall.initialize();
         } catch (Exception e) {

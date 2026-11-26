@@ -34,6 +34,7 @@ import cn.classfun.droidvm.BuildConfig;
 import cn.classfun.droidvm.daemon.console.FDPipeConsoleStream;
 import cn.classfun.droidvm.daemon.console.InputConsoleStream;
 import cn.classfun.droidvm.daemon.console.SimpleConsoleStream;
+import cn.classfun.droidvm.daemon.Daemon;
 import cn.classfun.droidvm.daemon.display.DaemonSystemContext;
 import cn.classfun.droidvm.daemon.server.ServerContext;
 import cn.classfun.droidvm.daemon.vm.BootPlan;
@@ -43,6 +44,7 @@ import cn.classfun.droidvm.daemon.vm.VMBackendInstance;
 import cn.classfun.droidvm.daemon.vm.VMStartResult;
 import cn.classfun.droidvm.daemon.audio.HostAudioTable;
 import cn.classfun.droidvm.lib.data.HostAudioDevices;
+import cn.classfun.droidvm.lib.hugepage.PoolPreflight;
 import cn.classfun.droidvm.lib.natives.NativeProcess;
 import cn.classfun.droidvm.lib.utils.RunUtils;
 import cn.classfun.droidvm.lib.store.base.DataItem;
@@ -68,6 +70,7 @@ import cn.classfun.droidvm.lib.store.vm.SharedDirType;
 import cn.classfun.droidvm.lib.store.vm.VMBackend;
 import cn.classfun.droidvm.lib.store.vm.VMConfig;
 import cn.classfun.droidvm.lib.store.vm.VMHypervisor;
+import cn.classfun.droidvm.ui.main.settings.KernelModuleManager;
 import cn.classfun.droidvm.lib.store.vm.VMPeripheralConfig;
 import cn.classfun.droidvm.lib.store.vm.VMScreenConfig;
 import cn.classfun.droidvm.lib.store.vm.VMXhciConfig;
@@ -76,6 +79,7 @@ import cn.classfun.droidvm.lib.store.vm.VMXhciConfig;
 public final class CrosvmBackendInstance extends VMBackendInstance {
     private static final String TAG = "CrosvmBackendInstance";
     private static final String RUN_PATH = pathJoin(DATA_DIR, "run");
+    private static volatile Boolean hpModuleCache = null;
     private String controlSocketPath = null;
     /** Set by prepareGpuCgroup() once the cpuset exists and holds cores; else null. */
     private String gpuCgroupPath = null;
@@ -133,14 +137,17 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
     @Override
     public VMStartResult start() {
         var result = new VMStartResult();
+        Daemon.debugLog("CrosvmBackendInstance.start begin " + config.getName());
         if (!new File(RUN_PATH).mkdirs())
             Log.w(TAG, fmt("Failed to create run directory: %s", RUN_PATH));
         try {
             resolveSerialPorts();
+            Daemon.debugLog("CrosvmBackendInstance: serial ports resolved=" + resolvedSerials.size());
         } catch (IOException e) {
             // A refused serial slot fails the whole start; the reason lands on the stdio
             // console where every other boot failure already goes.
             Log.e(TAG, "Serial setup refused", e);
+            Daemon.debugLog("CrosvmBackendInstance: serial setup refused: " + e);
             stdioStream.appendBuffer(fmt("serial setup failed: %s\n", e.getMessage()));
             closeSerialPorts();
             return result;
@@ -177,6 +184,7 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
                 // to attempt: fail here, with the path and its length on the console the user is
                 // already looking at, the way a refused serial slot does.
                 Log.e(TAG, "Display input socket path refused", e);
+                Daemon.debugLog("CrosvmBackendInstance: display input socket path refused: " + e);
                 stdioStream.appendBuffer(fmt("display input setup failed: %s\n", e.getMessage()));
                 inputBridge.release();
                 closeSerialPorts();
@@ -187,11 +195,69 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         // Must happen before buildCommand(): crosvm opens <cgroup>/tasks and never
         // creates the directory, and buildCommand() only passes the flag if this worked.
         prepareGpuCgroup();
+        // pseudo-unprotected RAM is SHARE'd to the guest through /dev/gunyah_share, which only
+        // exists while gunyah_host_share is loaded. Waiting for the user to press "load" (or to
+        // arm autostart) is what produced a VM that dies at GH_VM_START with ENOENT and a black
+        // display; the configuration already says it needs the module, so load it here.
+        ensureGunyahShareModule();
         var args = buildCommand();
+        // The reserve is loaded before the command is built (buildCommand may load it for a
+        // hugepages=true VM), and its pages must be free before crosvm reaches the SHIM pin.
+        // On this kernel its serve kretprobe does not cover __folio_alloc_noprof, so keeping it
+        // loaded only parks 2 GB where the pin's migration cannot use it.
+        PoolPreflight.releaseForStart(config.item);
+        logCommand(args);
         Log.i(TAG, fmt("Executing: %s", String.join(" ", args)));
+        // Without root the daemon runs in the app JVM (untrusted_app SELinux
+        // domain), where execve() of any extracted binary is refused by the
+        // policy (errno=13). With root available, exec the VMM through su so
+        // it lands in the root domain: `su -c "exec <argv>..."` keeps the pid
+        // and inherited fds so the wait/pipe plumbing in NativeProcess still
+        // works, and the daemon itself may stay in-process.
+        if (!RunUtils.isNoRootMode()) {
+            var cmd = new StringBuilder("exec");
+            for (var a : args) cmd.append(' ').append(shellQuote(a));
+            args = new ArrayList<>(List.of("/system/bin/su", "-c", cmd.toString()));
+            Log.i(TAG, fmt("Executing via su: %s", cmd));
+            Daemon.debugLog("CrosvmBackendInstance: exec via su " + cmd);
+        }
         try {
             var builder = new NativeProcess.Builder(args.toArray(new String[0]));
+            // Set LD_LIBRARY_PATH so crosvm can find shared libraries from both
+            // the APK's native lib dir and the extracted prebuilt usr/lib dir.
+            // usr/lib first: its libvncserver is the one crosvm was built against;
+            // the app's own lib/libvncserver.so is for the in-app VNC paths and
+            // crashes the crosvm VNC server when it shadows the prebuilt.
+            var libPath = fmt(
+                "%s:%s",
+                pathJoin(DATA_DIR, "usr", "lib"),
+                pathJoin(DATA_DIR, "lib")
+            );
+            builder.environment("LD_LIBRARY_PATH", libPath);
+            // Allow custom env vars via "crosvm_env": ["KEY=VALUE", ...]
+            config.item.opt("crosvm_env", DataItem.newArray()).forEach(e -> {
+                var kv = e.getValue().asString();
+                var idx = kv.indexOf('=');
+                if (idx > 0)
+                    builder.environment(kv.substring(0, idx), kv.substring(idx + 1));
+            });
             prepareProcess(builder);
+            // Diagnostic: confirm the LD_PRELOAD / LD_LIBRARY_PATH targets exist
+            // before spawn — a missing one sinks crosvm silently as exit 127.
+            try {
+                var libSimple = new File(DATA_DIR, "lib/libsimpledump.so");
+                var libCompat = new File(DATA_DIR, fmt("lib/libcompat_a%s.so", android.os.Build.VERSION.RELEASE));
+                var libVnc = new File(DATA_DIR, "usr/lib/libvncserver.so");
+                var crosvmBin = new File(DATA_DIR, "usr/bin/crosvm");
+                Daemon.debugLog("CrosvmBackendInstance: pre-spawn checks libsimpledump=" +
+                    libSimple.exists() + "/" + libSimple.length() + " libcompat=" +
+                    libCompat.getAbsolutePath() + "/" + libCompat.exists() +
+                    " libvncserver=" + libVnc.exists() + "/" + libVnc.length() +
+                    " crosvm=" + crosvmBin.exists() + "/" + crosvmBin.length() +
+                    " LD_LIBRARY_PATH=" + fmt("%s:%s", pathJoin(DATA_DIR, "lib"), pathJoin(DATA_DIR, "usr", "lib")) +
+                    " LD_PRELOAD=" + fmt("%s:%s", pathJoin(DATA_DIR, "lib", "libsimpledump.so"), pathJoin(DATA_DIR, "lib", fmt("libcompat_a%s.so", android.os.Build.VERSION.RELEASE))));
+            } catch (Exception ignored) {
+            }
             applyGfxstreamEnv(builder);
             applyDisplayBlitEnv(builder);
             applyGpuRtPrioEnv(builder);
@@ -201,7 +267,19 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
                     builder.preserveFd(rs.pipe.getInputRemoteFd());
                 }
             }
+            try {
+                Daemon.debugLog("CrosvmBackendInstance: spawning crosvm " + args.get(0));
+            } catch (Exception ignored) {
+            }
             var process = builder.start();
+            {
+                // trace the spawn: a silent failure here (binary missing, LD_LIBRARY_PATH
+                // wrong) is invisible in logcat, but the console may show nothing.
+                try {
+                    Daemon.debugLog("CrosvmBackendInstance: crosvm spawned pid=" + process.pid());
+                } catch (Exception ignored) {
+                }
+            }
             for (var rs : resolvedSerials)
                 if (rs.pipe != null) rs.pipe.closeRemoteFd();
             result.setProcess(process);
@@ -209,6 +287,11 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
             stderrStream.setInputStream(process.getErrorStream());
         } catch (IOException e) {
             Log.e(TAG, "Failed to start crosvm process", e);
+            try {
+                Daemon.debugLog("crosvm start failed: " + e.getMessage());
+                Daemon.debugLog(android.util.Log.getStackTraceString(e));
+            } catch (Exception ignored) {
+            }
             closeSerialPorts();
             controlSocketPath = null;
             inputBridge.release();
@@ -305,15 +388,27 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         var item = config.item;
         var args = new ArrayList<String>();
         prepareStraceArguments(args);
-        args.add(getPrebuiltBinaryPath("crosvm"));
+        // Allow custom crosvm binary path for testing modified builds
+        var crosvmBinary = item.optString("crosvm_binary", "");
+        if (crosvmBinary.isEmpty())
+            crosvmBinary = getPrebuiltBinaryPath("crosvm");
+        args.add(crosvmBinary);
         // Top-level flag (must precede `run`): makes crosvm surface CommandStatus
         // exit codes (see CrosvmExit) so runVM() can tell reset/crash/panic apart.
         args.add("--extended-status");
         args.add("run");
         args.add("--name");
         args.add(config.getName());
+        long guestMemMb = Math.max(item.optLong("memory_mb", 512), 64);
+        // Give the host a moment to make room before crosvm asks Gunyah for the guest's RAM.
+        // Measured on this device: with less than roughly --mem + 1.5 GB free, GH-SHIM's
+        // MEM_ACCEPT comes back EBUSY (error 0x15) and the VM sits at 48 MB of disk reads with a
+        // black screen -- the start looks alive but never reaches the guest. The huge-page module
+        // is what used to bound this (PoolPreflight reads its pool), and it is not loaded here, so
+        // free RAM has to be measured directly.
+        awaitHostMemory(guestMemMb);
         args.add("--mem");
-        args.add(String.valueOf(Math.max(item.optLong("memory_mb", 512), 64)));
+        args.add(String.valueOf(guestMemMb));
         args.add("--cpus");
         args.add(String.valueOf(Math.max(item.optLong("cpu_count", 1), 1)));
         buildCpuPlacementCommand(args);
@@ -445,21 +540,44 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         // buildPeripheralCommand.
         if (!VMXhciConfig.isEnabled(item))
             args.add("--no-usb");
-        if (!item.optBoolean("sandbox", false))
+        if (RunUtils.isNoRootMode() || !item.optBoolean("sandbox", false) || Daemon.isRunningInProcess())
             args.add("--disable-sandbox");
-        if (item.optBoolean("hugepages", true))
+        // Check if gh_hugepage_reserve module is loaded before enabling hugepages.
+        // Without the module, crosvm's --hugepages flag causes it to fail immediately.
+        // If the module isn't loaded, try to load it (root mode), and if that fails,
+        // skip --hugepages and --prepare-lend-mthp-mode so the VM can still start
+        // with regular pageable memory (lower performance but functional).
+        var hpModule = isHugepageModuleLoaded();
+        if (!hpModule && !RunUtils.isNoRootMode()) {
+            Log.i(TAG, "gh_hugepage_reserve not loaded, attempting to load...");
+            hpModule = tryLoadHugepageModule();
+        }
+        // `--hugepages` is crosvm's MAP_HUGETLB path, which needs the kernel's hugetlbfs pool. The
+        // gh_hugepage_reserve module is a different mechanism (it serves 2 MB shmem folios for the
+        // Gunyah lend path), and a kernel can perfectly well have the module without hugetlbfs --
+        // this one has neither nr_hugepages nor HugePages_Total at all. Passing --hugepages there
+        // does not degrade, it fails: crosvm takes the memory with MAP_HUGETLB, the pages are not
+        // there, and GH_VM_START ends in "MEM_ACCEPT (error 0x15)". Measured on this device.
+        long hpTotal = hugepageTotalPages();
+        boolean hpUsable = hpTotal > 0;
+        if (hpModule && !hpUsable)
+            Log.i(TAG, "gh_hugepage_reserve is loaded but the kernel has no hugetlbfs pool"
+                + " (HugePages_Total=" + hpTotal + "); starting without --hugepages");
+        if (!RunUtils.isNoRootMode() && item.optBoolean("hugepages", true) && hpUsable)
             args.add("--hugepages");
-        switch (LendMthpMode.fromItem(item)) {
-            case SINGLE:
-                args.add("--prepare-lend-mthp-mode");
-                args.add("single");
-                break;
-            case CHUNKED:
-                args.add("--prepare-lend-mthp-mode");
-                args.add("chunked");
-                break;
-            default:
-                break;
+        if (!RunUtils.isNoRootMode() && hpModule) {
+            switch (LendMthpMode.fromItem(item)) {
+                case SINGLE:
+                    args.add("--prepare-lend-mthp-mode");
+                    args.add("single");
+                    break;
+                case CHUNKED:
+                    args.add("--prepare-lend-mthp-mode");
+                    args.add("chunked");
+                    break;
+                default:
+                    break;
+            }
         }
         var swiotlbMb = item.optLong("swiotlb_mb", 0);
         // A pseudo-unprotected VM has nothing to bounce through -- its RAM is shared to it, so the
@@ -522,6 +640,13 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         return args;
     }
 
+    /** Dump the full crosvm command line to daemon-debug.log for debugging. */
+    private void logCommand(List<String> args) {
+        var sb = new StringBuilder();
+        for (var a : args) sb.append(' ').append(a);
+        Daemon.debugLog("CrosvmBackendInstance: command: " + sb);
+    }
+
     private static long pflashBlockSize(@NonNull String path) {
         long size = new File(path).length();
         for (long blockSize : new long[]{262144, 65536, 4096})
@@ -540,6 +665,11 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
      */
     private void prepareGpuCgroup() {
         gpuCgroupPath = null;
+        // No-root mode: can't create cgroups (needs CAP_SYS_ADMIN).
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, "No-root mode: skipping GPU cgroup setup");
+            return;
+        }
         var item = config.item;
         // The switch and the device both: the threads this cpuset exists to hold are the
         // virtio-gpu device's workers, so with no device there is nobody to put in it.
@@ -650,7 +780,19 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         for (var iter : nets) {
             var net = iter.getValue();
             var tapName = net.optString("tap_name", "");
-            if (tapName.isEmpty()) continue;
+            // No-root mode cannot create TAPs. This build of crosvm has no `--net user`
+            // (SLIRP) backend -- it only accepts tap-name/tap-fd -- so there is nothing to
+            // fall back to; starting with a bogus `user` argument would fail the whole VM.
+            if (RunUtils.isNoRootMode()) {
+                Log.w(TAG, "No-root mode: crosvm has no SLIRP backend, starting without a NIC");
+                continue;
+            }
+            // Empty means setupTaps did not run or failed; passing no --net is better than
+            // passing an argument crosvm would reject.
+            if (tapName.isEmpty()) {
+                Log.w(TAG, "NIC has no tap_name, skipping --net");
+                continue;
+            }
             var netArg = new StringBuilder();
             netArg.append("tap-name=");
             netArg.append(tapName);
@@ -725,6 +867,37 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         var hypervisor = VMHypervisor.valueOf(hyp.toUpperCase());
         hypervisor = VMHypervisor.resolveConfigured(VMBackend.CROSVM, hypervisor);
         return hypervisor == VMHypervisor.GUNYAH;
+    }
+
+    /**
+     * Loads {@code gunyah_host_share} when this VM will need {@code /dev/gunyah_share}.
+     *
+     * <p>Pseudo-unprotected VMs hand their RAM to the guest as Gunyah parcels through that
+     * device node; it comes from the module shipped under {@code usr/lib/modules/<kmi>/}, not
+     * from the stock kernel. Without it crosvm fails with
+     * {@code failed to initialize virtual machine: No such file or directory} about two seconds
+     * after the process starts -- after the UI has already opened the display, so what the user
+     * sees is a black screen. Root is required and already assumed for crosvm itself (it is
+     * exec'd through {@code su}); in no-root mode there is nothing to load and the failure is
+     * reported on the console instead.</p>
+     */
+    private void ensureGunyahShareModule() {
+        if (RunUtils.isNoRootMode() || !isGunyahHypervisor()) return;
+        var configured = optEnum(config.item, "protected_vm", ProtectedVM.PROTECTED_WITHOUT_FIRMWARE);
+        if (ProtectedVM.resolveFor(configured, VMBackend.CROSVM, VMHypervisor.GUNYAH)
+            != ProtectedVM.PSEUDO_UNPROTECTED)
+            return;
+        if (new File("/dev/gunyah_share").exists()) return;
+        boolean loaded = KernelModuleManager.ensureLoaded("gunyah_host_share");
+        if (loaded) {
+            Log.i(TAG, "gunyah_host_share loaded for this start");
+        } else {
+            Log.w(TAG, "gunyah_host_share could not be loaded; crosvm will fail at GH_VM_START");
+        }
+        try {
+            Daemon.debugLog("CrosvmBackendInstance: gunyah_host_share loaded=" + loaded);
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -868,21 +1041,19 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
                 gpuArg.append(fmt(",pci-bar-size=%d",
                     item.optLong("gpu_pci_bar_size", 0x100000000L)));
             } else {
+                // No `context-types` here on purpose, matching the drm/venus branches above.
+                //
+                // Measured on this device, twice over: naming `virgl2` makes rutabaga build and
+                // initialise its virglrenderer component, vrend comes up on the SoC's GLES, and
+                // the guest's 3D submits succeed -- but every frame the guest then renders goes
+                // into a host-GL resource the CPU-copy scanout cannot read back, so the display
+                // is black from the moment the guest switches its scanout to it. Naming nothing
+                // (or `virgl`) keeps the guest off host-GL virgl, which is the arrangement this
+                // platform can actually present. The intended accelerated path is the NATIVE
+                // branch above (native context + guest driver), not this one.
                 gpuArg.append(fmt(",vulkan=%s", String.valueOf(api == VULKAN)));
-                switch (api) {
-                    case EGL:
-                        gpuArg.append(",egl=true");
-                        break;
-                    case OPENGLES:
-                        gpuArg.append(",gles=true");
-                        break;
-                    case ANGLE:
-                        // crosvm has no `angle` --gpu key and rejects unknown ones outright, so
-                        // emitting it would stop the VM from starting. Treat a config that
-                        // still carries ANGLE as GLES, which is what the editor migrates it to.
-                        gpuArg.append(",gles=true");
-                        break;
-                }
+                if (api == GpuApi.EGL || api == GpuApi.OPENGLES || api == GpuApi.ANGLE)
+                    gpuArg.append(",egl=true,gles=true");
             }
             args.add("--gpu");
             args.add(gpuArg.toString());
@@ -1158,6 +1329,13 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         // missing.
         var api = optEnum(item, "gpu_api", GpuApi.NONE);
         boolean systemDriver = api == GpuApi.VULKAN_SYSTEM || api == GpuApi.VULKAN_PANVK;
+        // Which ICD the renderer will dlopen is the difference between a working GPU and a VM
+        // that aborts in gfxstream ("No physical devices available"), and it is not visible in
+        // the command line. Record the decision where the daemon log already lives.
+        try {
+            Daemon.debugLog("gpu ICD: api=" + api + " systemDriver=" + systemDriver);
+        } catch (Exception ignored) {
+        }
         if (!systemDriver) {
             var turnip = pathJoin(DATA_DIR, "usr", "lib", "libvulkan_freedreno.so");
             if (new File(turnip).exists()) {
@@ -1168,9 +1346,11 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         // whole host-visible allocation can be wrapped as one dma-buf. The glob covers
         // both the in-tree driver (/sys/module/udmabuf) and the app-shipped fallback
         // module for kernels without CONFIG_UDMABUF (/sys/module/udmabuf_gki_6.1 etc.).
-        RunUtils.run("for p in /sys/module/udmabuf*/parameters/size_limit_mb; do " +
-                "echo %d > \"$p\"; done 2>/dev/null || true",
-            item.optLong("gpu_udmabuf_limit_mb", 4096));
+        // No-root mode: can't write to /sys/module, skip.
+        if (!RunUtils.isNoRootMode())
+            RunUtils.run("for p in /sys/module/udmabuf*/parameters/size_limit_mb; do " +
+                    "echo %d > \"$p\"; done 2>/dev/null || true",
+                item.optLong("gpu_udmabuf_limit_mb", 4096));
     }
 
     /**
@@ -1689,5 +1869,194 @@ public final class CrosvmBackendInstance extends VMBackendInstance {
         }
         inputBridge.release();
         closeSerialPorts();
+    }
+
+    /**
+     * Checks if the gh_hugepage_reserve kernel module is loaded.
+     * Uses /sys/module/gh_hugepage_reserve existence (fast, non-blocking).
+     * Result is cached per process.
+     */
+    /** Free RAM the host currently has, in MB, or -1 when /proc/meminfo cannot be read. */
+    private static long hostAvailableMb() {
+        try {
+            var r = RunUtils.runQuiet("grep -m1 '^MemAvailable:' /proc/meminfo");
+            var parts = r.getOutString().trim().split("\\s+");
+            return parts.length >= 2 ? Long.parseLong(parts[1]) / 1024 : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
+     * Waits for the host to have {@code guestMemMb + 1536} MB available, flushing caches once.
+     *
+     * <p>This is not a policy about how much RAM a VM may use; it is the threshold below which the
+     * start has been measured to fail at the Gunyah boundary rather than in the guest. A VM that
+     * starts with less sits in MEM_ACCEPT retry with a black display and never boots, which looks
+     * like a graphics fault and is not one. Sixteen looks half a second apart, then proceed anyway:
+     * the user asked for this start, and a slow start is better than a silently refused one.
+     */
+    private static void awaitHostMemory(long guestMemMb) {
+        long want = guestMemMb + 1536;
+        boolean flushed = false;
+        for (int i = 0; i < 20; i++) {
+            long avail = hostAvailableMb();
+            if (avail < 0 || avail >= want) return;
+            if (!flushed) {
+                flushed = true;
+                Log.i(TAG, "host memory " + avail + "MB < " + want + "MB, dropping caches first");
+                RunUtils.runQuiet("sync; echo 3 > /proc/sys/vm/drop_caches");
+            } else {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+        Log.w(TAG, "starting anyway with " + hostAvailableMb() + "MB available (want "
+            + want + "MB); GH-SHIM may refuse MEM_ACCEPT");
+    }
+
+    /**
+     * How many 2 MB hugetlbfs pages the kernel has, or -1 when the kernel has no hugetlbfs at all
+     * (no HugePages_Total in /proc/meminfo). -1 and 0 both mean "do not pass --hugepages".
+     */
+    private static long hugepageTotalPages() {
+        try {
+            var r = RunUtils.runQuiet("grep -m1 '^HugePages_Total:' /proc/meminfo");
+            var line = r.getOutString().trim();
+            if (line.isEmpty()) return -1;
+            var parts = line.split("\\s+");
+            return parts.length >= 2 ? Long.parseLong(parts[parts.length - 1]) : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** Pages the reserve currently holds, or -1 when the module is not there / has no such knob. */
+    private static long hugepagePoolAvailPages() {
+        try {
+            var r = RunUtils.runQuiet(
+                "cat /sys/module/gh_hugepage_reserve/parameters/pool_avail 2>/dev/null");
+            var s = r.getOutString().trim();
+            if (s.isEmpty()) return -1;
+            return Long.parseLong(s);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static boolean isHugepageModuleLoaded() {
+        // Only a positive answer is cached. A negative one has to be re-asked every start: the
+        // module can be loaded by a KernelSU/Magisk boot script, or by the load path below after a
+        // previous start failed, and caching `false` for the process lifetime meant --hugepages was
+        // skipped for every VM started afterwards even though the reserve was there.
+        if (hpModuleCache != null && hpModuleCache) return true;
+        try {
+            var result = RunUtils.runQuiet("test -d /sys/module/gh_hugepage_reserve && echo yes || echo no");
+            boolean loaded = result.getOutString().trim().equals("yes");
+            hpModuleCache = loaded ? Boolean.TRUE : null;
+            Log.i(TAG, "gh_hugepage_reserve loaded: " + loaded);
+            return loaded;
+        } catch (Exception e) {
+            Log.i(TAG, "Failed to check gh_hugepage_reserve: " + e.getMessage());
+            hpModuleCache = null;
+            return false;
+        }
+    }
+
+    /**
+     * Tries to load gh_hugepage_reserve via modprobe or insmod.
+     * Returns true if the module is loaded after this call.
+     * Only called in root mode.
+     */
+    private static boolean tryLoadHugepageModule() {
+        // Try modprobe first (handles dependencies)
+        var result = RunUtils.runQuiet("modprobe gh_hugepage_reserve 2>&1");
+        if (isHugepageModuleLoaded()) {
+            Log.i(TAG, "gh_hugepage_reserve loaded via modprobe");
+            return true;
+        }
+        // Try insmod with common args
+        var result2 = RunUtils.runQuiet("insmod /system/lib/modules/gh_hugepage_reserve.ko 2>&1");
+        if (isHugepageModuleLoaded()) {
+            Log.i(TAG, "gh_hugepage_reserve loaded via insmod");
+            return true;
+        }
+        // KernelSU / Magisk module: its load.sh is the single source of truth for the insmod
+        // arguments (pool_want, the CMA preflight values, the per-symbol disable list), and only
+        // root can even see /data/adb -- a plain File.exists() from the app's uid is always false.
+        // Its own boot script loads it too; this is for the "user disabled it, now wants it back"
+        // case, so it must reproduce the same arguments or not load it at all.
+        var loadSh = "/data/adb/modules/gh-hugepage-reserve/load.sh";
+        var hasLoadSh = RunUtils.runQuiet("test -f %s && echo y || echo n", loadSh)
+            .getOutString().trim().equals("y");
+        if (hasLoadSh) {
+            RunUtils.runQuiet("sh %s 2>&1", loadSh);
+            try {
+                Thread.sleep(800);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (isHugepageModuleLoaded()) {
+                Log.i(TAG, "gh_hugepage_reserve loaded via its load.sh");
+                return true;
+            }
+            return false;
+        }
+        // Deliberately no bare `insmod` fallback for this module: without load.sh's arguments it
+        // comes up with want=0, reports "ready: held=0 cma=0", and unloads itself ~50 ms later.
+        // That window is long enough for the check below to see it "loaded" and hand crosvm a
+        // --prepare-lend-mthp-mode it cannot honour, and it reserves nothing either way.
+        // The app's own module bundle (usr/lib/modules/<kmi>/), if this build ships one.
+        if (KernelModuleManager.ensureLoaded("gh_hugepage_reserve") && isHugepageModuleLoaded()) {
+            Log.i(TAG, "gh_hugepage_reserve loaded from the shipped module bundle");
+            return true;
+        }
+        // Every place a gh-hugepage-reserve release is known to install itself. The KernelSU and
+        // Magisk module directories come first: that is how the module is distributed today, and
+        // neither `modprobe` nor /system/lib/modules has it, which is why the reserve stayed
+        // unloaded (and every VM silently ran without --hugepages).
+        var paths = new String[]{
+            "/data/adb/modules/gh-hugepage-reserve/gh_hugepage_reserve.ko",
+            "/data/adb/modules/gh_hugepage_reserve.ko",
+            "/data/adb/modules/gh_hugepage_reserve/gh_hugepage_reserve.ko",
+            "/data/adb/modules/ko/gh_hugepage_reserve/gh_hugepage_reserve.ko",
+            "/vendor/lib/modules/gh_hugepage_reserve.ko",
+            "/system/lib/modules/gh_hugepage_reserve.ko",
+            "/lib/modules/gh_hugepage_reserve.ko"
+        };
+        for (var p : paths) {
+            RunUtils.runQuiet("insmod %s 2>&1", p);
+            if (isHugepageModuleLoaded()) {
+                Log.i(TAG, "gh_hugepage_reserve loaded via insmod: " + p);
+                return true;
+            }
+        }
+        // Last resort: whatever module manager layout this device uses, find the file by name.
+        var found = RunUtils.runQuiet(
+            "find /data/adb/modules -name gh_hugepage_reserve.ko 2>/dev/null | head -1");
+        var foundPath = found.getOutString().trim();
+        if (!foundPath.isEmpty()) {
+            RunUtils.runQuiet("insmod %s 2>&1", foundPath);
+            if (isHugepageModuleLoaded()) {
+                Log.i(TAG, "gh_hugepage_reserve loaded via insmod (found): " + foundPath);
+                return true;
+            }
+        }
+        Log.w(TAG, "gh_hugepage_reserve could not be loaded, skipping hugepages");
+        return false;
+    }
+
+    /**
+     * POSIX-shell single-quote a command-line token. crosvm's arguments (paths,
+     * the VM name, key=value options) contain no single quotes in practice, but
+     * the quote is what makes the whole string safe as one `su -c` token.
+     */
+    @NonNull
+    private static String shellQuote(@NonNull String s) {
+        return "'" + s.replace("'", "'\\''") + "'";
     }
 }

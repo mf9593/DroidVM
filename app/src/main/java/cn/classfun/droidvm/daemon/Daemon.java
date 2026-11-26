@@ -5,6 +5,8 @@ package cn.classfun.droidvm.daemon;
 
 import static android.os.Process.myPid;
 import static cn.classfun.droidvm.BuildConfig.APPLICATION_ID;
+import static cn.classfun.droidvm.BuildConfig.VERSION_CODE;
+import static cn.classfun.droidvm.BuildConfig.VERSION_NAME;
 import static cn.classfun.droidvm.lib.Constants.DATA_DIR;
 import static cn.classfun.droidvm.lib.daemon.DaemonHelper.getPidFile;
 import static cn.classfun.droidvm.lib.daemon.DaemonHelper.getPortFile;
@@ -28,6 +30,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -47,6 +50,49 @@ public final class Daemon {
     private static final AtomicBoolean cleaned = new AtomicBoolean(false);
     public static String daemonHash = null;
     private static Process logcatProcess = null;
+    public static volatile boolean runningInProcess = false;
+    private static Server inProcessServer = null;
+    /** Cross-adb debug log; the in-process daemon writes here, not to {@link #LOG_PATH}. */
+    public static final String DEBUG_LOG = "/storage/emulated/0/DroidVM/daemon-debug.log";
+
+    public static void debugLog(String msg) {
+        try {
+            var dir = new File("/storage/emulated/0/DroidVM");
+            if (!dir.exists()) dir.mkdirs();
+            try (var w = new FileWriter(DEBUG_LOG, true)) {
+                w.write(fmt("[%s] %s\n", java.time.LocalDateTime.now(), msg));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "debugLog failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Global uncaught exception pre-handler installed at daemon start: it writes every
+     * uncaught exception's stack trace to daemon-debug.log (where cross-adb reads are
+     * reliable) before the default handler runs and the process dies. Covers both the
+     * daemon thread pool and the UI thread, because a VM start crash may surface on any
+     * thread of the in-process daemon host.
+     */
+    private static void installUncaughtExceptionHandler() {
+        try {
+            Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+            Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+                try {
+                    debugLog("UNCAUGHT in thread " + t.getName() + ": " + e);
+                    debugLog(android.util.Log.getStackTraceString(e));
+                } catch (Exception ignored) {
+                }
+                if (prev != null) {
+                    try {
+                        prev.uncaughtException(t, e);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
 
     // Held for the whole process lifetime so the advisory lock stays taken; the
     // kernel drops it automatically when this process dies (including SIGKILL),
@@ -249,8 +295,12 @@ public final class Daemon {
                 Log.w(TAG, "failed to remove old log");
             writeFile(file, "");
             var uid = Server.getDroidVMUid();
-            Os.chmod(LOG_PATH, 0600);
-            Os.chown(LOG_PATH, uid, uid);
+            try {
+                Os.chmod(LOG_PATH, 0600);
+                Os.chown(LOG_PATH, uid, uid);
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to set log file permissions (no-root mode?)");
+            }
             builder.command(
                 findExecute("logcat", "/system/bin/logcat"),
                 fmt("--pid=%d", myPid())
@@ -267,6 +317,105 @@ public final class Daemon {
         if (logcatProcess == null) return;
         logcatProcess.destroy();
         logcatProcess = null;
+    }
+
+    public static boolean startInProcess(boolean force) {
+        installUncaughtExceptionHandler();
+        // The in-process daemon runs in the app's JVM, where nothing else loads
+        // libunixhelper.so (only Daemon.main() does, on the standalone path). VM
+        // start uses nativePipe()/nativePollIn() etc., so loading here is required
+        // for any VM to boot. load() is idempotent and safe to call again.
+        UnixHelper.load();
+        debugLog("startInProcess(force=" + force + ")");
+        if (runningInProcess) {
+            debugLog("Daemon already running in-process, skipping");
+            return false;
+        }
+        if (!acquireLock(force)) {
+            debugLog("acquireLock failed");
+            return false;
+        }
+        debugLog("acquireLock succeeded");
+        runningInProcess = true;
+        // daemonHash must be computed here even though startInProcess() bypasses main():
+        // it runs the Server without invoking main(), so the daemon's reported hash would
+        // otherwise remain null. VersionHandler needs it to answer "version" to clients.
+        try {
+            daemonHash = getMyHash();
+            Log.i(TAG, fmt("DroidVM Daemon hash: %s", daemonHash));
+            debugLog("Daemon started in-process pid=" + myPid() + " hash=" + daemonHash + " vcode=" + VERSION_CODE + " name=" + VERSION_NAME);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to compute daemon hash", e);
+            debugLog("Daemon hash failed: " + e);
+        }
+        writePidFile();
+        debugLog("PID file written, pid=" + myPid());
+        writeTokenFile();
+        debugLog("Token file written");
+        try {
+            inProcessServer = new Server();
+            debugLog("Server created");
+        } catch (Exception e) {
+            debugLog("Server creation failed: " + e);
+            Log.e(TAG, "Failed to create Server, cleaning up", e);
+            runningInProcess = false;
+            try { if (lockChannel != null) lockChannel.close(); } catch (Exception ignored) {}
+            var pidFile = new File(RUN_DIR, "droidvmd.pid");
+            var tokenFile = new File(RUN_DIR, "droidvmd-token.txt");
+            var lockFile = new File(LOCK_FILE);
+            if (pidFile.exists()) pidFile.delete();
+            if (tokenFile.exists()) tokenFile.delete();
+            if (lockFile.exists()) lockFile.delete();
+            return false;
+        }
+        Thread serverThread = new Thread(inProcessServer::run, "DaemonServer");
+        serverThread.setDaemon(true);
+        serverThread.start();
+        debugLog("Server thread started");
+        // libsu is the daemon's only path to root (RootRunContext). If it silently falls back
+        // to an app-uid shell, every netbox/insmod/sysctl call fails with EPERM and the user
+        // sees only "setupTaps failed"; record which identity it actually got.
+        try {
+            var probe = cn.classfun.droidvm.lib.utils.RunUtils.runQuiet("id");
+            debugLog("root probe: exit=" + probe.getCode()
+                + " out=" + probe.getOutString().trim()
+                + " err=" + probe.getErrString().trim());
+        } catch (Exception e) {
+            debugLog("root probe failed: " + e);
+        }
+        Log.i(TAG, "Daemon started in-process (no-root mode)");
+        return true;
+    }
+
+    public static void stopInProcess() {
+        debugLog("stopInProcess: called, runningInProcess=" + runningInProcess);
+        if (!runningInProcess) return;
+        runningInProcess = false;
+        if (inProcessServer != null) {
+            debugLog("stopInProcess: stopping server");
+            inProcessServer.stop();
+            inProcessServer = null;
+        }
+        // Clean up lock and files
+        try {
+            if (lockChannel != null) lockChannel.close();
+        } catch (Exception ignored) {
+        }
+        var pidFile = new File(RUN_DIR, "droidvmd.pid");
+        var tokenFile = new File(RUN_DIR, "droidvmd-token.txt");
+        var portFile = new File(RUN_DIR, "droidvmd-port.txt");
+        var lockFile = new File(LOCK_FILE);
+        if (pidFile.exists()) pidFile.delete();
+        if (tokenFile.exists()) tokenFile.delete();
+        if (portFile.exists()) debugLog("stopInProcess: deleting stale port file");
+        if (portFile.exists()) portFile.delete();
+        if (lockFile.exists()) lockFile.delete();
+        debugLog("stopInProcess: done, all files cleaned up");
+        Log.i(TAG, "Daemon stopped in-process");
+    }
+
+    public static boolean isRunningInProcess() {
+        return runningInProcess;
     }
 
     public static void main(String... args) {
@@ -290,8 +439,17 @@ public final class Daemon {
         HostAudioTable.start(DaemonSystemContext.get());
         daemonHash = getMyHash();
         Log.i(TAG, fmt("DroidVM Daemon hash: %s", daemonHash));
+        try {
+            debugLog("Daemon started pid=" + myPid() + " hash=" + daemonHash + " vcode=" + VERSION_CODE + " name=" + VERSION_NAME);
+        } catch (Exception ignored) {
+        }
         writePidFile();
         writeTokenFile();
+        // Install a process-wide uncaught exception handler that logs to daemon-debug.log
+        // before re-throwing to the default handler. Android's default handler also writes
+        // the crash, but its output lands in logcat buffers we can't always read from
+        // across adb; the file is reliable and persistent.
+        installUncaughtExceptionHandler();
         var server = new Server();
         UnixHelper.installSignalHandler("INT", sig -> {
             Log.i(TAG, fmt("Received signal %d (INT), shutting down...", sig));

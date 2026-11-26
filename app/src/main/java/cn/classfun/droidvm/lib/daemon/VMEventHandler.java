@@ -9,6 +9,7 @@ import static android.widget.Toast.LENGTH_SHORT;
 import static cn.classfun.droidvm.lib.utils.FileUtils.calcHashForFile;
 import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
 import static cn.classfun.droidvm.lib.utils.ThreadUtils.runOnPool;
+import static cn.classfun.droidvm.lib.utils.RunUtils.isNoRootMode;
 
 import android.app.Activity;
 import android.app.Application;
@@ -39,7 +40,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 
+import cn.classfun.droidvm.BuildConfig;
 import cn.classfun.droidvm.R;
+import cn.classfun.droidvm.daemon.Daemon;
 import cn.classfun.droidvm.lib.data.CrosvmExit;
 import cn.classfun.droidvm.lib.diag.LogHelper;
 import cn.classfun.droidvm.lib.store.vm.VMState;
@@ -246,6 +249,17 @@ public final class VMEventHandler implements
     private boolean isOutdatedDaemon(JSONObject resp) {
         try {
             var daemonHash = resp.optString("daemon_hash", "");
+            var daemonVersionCode = resp.optInt("version_code", -1);
+            var localVersionCode = BuildConfig.VERSION_CODE;
+            // The daemon runs in-process from the app's own APK, so when the version code
+            // matches this is this build. The raw file hash can differ for split-ABI or other
+            // APK layout reasons even from the same APK, so treat it as informational only -
+            // authoritativeness belongs to the version code. This prevents an infinite
+            // "outdated daemon" dialog loop when the hashes never agree.
+            if (daemonVersionCode == localVersionCode) {
+                Log.i(TAG, fmt("Daemon version_code matches app: %d", daemonVersionCode));
+                return false;
+            }
             if (daemonHash.isEmpty()) {
                 Log.w(TAG, "Daemon did not report daemon_hash");
                 return true;
@@ -254,6 +268,10 @@ public final class VMEventHandler implements
             if (daemonHash.equals(localHash)) {
                 Log.i(TAG, "Daemon hash matches app");
                 return false;
+            }
+            try {
+                Daemon.debugLog("Hash mismatch: daemon=" + daemonHash + " app=" + localHash + " daemon_vcode=" + daemonVersionCode + " app_vcode=" + localVersionCode);
+            } catch (Exception ignored) {
             }
             Log.w(TAG, fmt("Daemon hash mismatch: daemon=%s app=%s", daemonHash, localHash));
             return true;
@@ -264,6 +282,7 @@ public final class VMEventHandler implements
     }
 
     private void checkDaemonHash() {
+        if (isNoRootMode()) return;
         try {
             var req = new JSONObject();
             req.put("command", "version");

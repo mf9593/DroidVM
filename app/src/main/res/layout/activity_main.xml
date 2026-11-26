@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fitsSystemWindows="true"
+    android:fitsSystemWindows="false"
     tools:context=".ui.main.MainActivity">
 
     <com.google.android.material.appbar.AppBarLayout
@@ -12,20 +12,24 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:fitsSystemWindows="true"
-        app:liftOnScroll="true">
+        app:liftOnScroll="false">
 
+        <!-- The title lives on the toolbar itself, not on a collapsing layout: one fixed row
+             with the log/refresh action icons, at the normal action-bar height. -->
         <com.google.android.material.appbar.CollapsingToolbarLayout
             android:id="@+id/collapsing_toolbar"
             style="?attr/collapsingToolbarLayoutMediumStyle"
             android:layout_width="match_parent"
-            android:layout_height="?attr/collapsingToolbarLayoutMediumSize"
-            app:layout_scrollFlags="scroll|exitUntilCollapsed|snap">
+            android:layout_height="?attr/actionBarSize"
+            app:layout_scrollFlags="noScroll"
+            app:titleEnabled="false">
 
             <com.google.android.material.appbar.MaterialToolbar
                 android:id="@+id/toolbar"
                 android:layout_width="match_parent"
                 android:layout_height="?attr/actionBarSize"
-                app:layout_collapseMode="pin" />
+                app:layout_collapseMode="pin"
+                app:titleTextAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
         </com.google.android.material.appbar.CollapsingToolbarLayout>
 
@@ -36,7 +40,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipChildren="false"
-        android:layout_marginBottom="80dp"
+        android:fitsSystemWindows="false"
         app:layout_behavior="@string/appbar_scrolling_view_behavior" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton

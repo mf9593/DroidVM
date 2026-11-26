@@ -28,6 +28,7 @@ import cn.classfun.droidvm.lib.natives.NativeProcess;
 import cn.classfun.droidvm.lib.store.base.DataItem;
 import cn.classfun.droidvm.lib.store.vm.VMConfig;
 import cn.classfun.droidvm.lib.utils.FileUtils;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 
 public abstract class VMBackendInstance {
     private static final String TAG = "VMBackendInstance";
@@ -80,6 +81,11 @@ public abstract class VMBackendInstance {
     }
 
     private void cleanUpMemory() {
+        // No-root mode: can't write to /proc/sys or /sys/kernel/mm.
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, "No-root mode: skipping memory cleanup");
+            return;
+        }
         run("echo madvise > /sys/kernel/mm/transparent_hugepage/enabled");
         run("echo madvise > /sys/kernel/mm/transparent_hugepage/defrag");
         run("echo advise > /sys/kernel/mm/transparent_hugepage/shmem_enabled");
@@ -113,7 +119,13 @@ public abstract class VMBackendInstance {
             pathJoin(DATA_DIR, "lib", fmt("libcompat_a%s.so", Build.VERSION.RELEASE)),
         };
         builder.environment("LD_PRELOAD", String.join(":", preload));
-        builder.environment("LD_LIBRARY_PATH", pathJoin(DATA_DIR, "usr", "lib"));
+        // LD_LIBRARY_PATH must cover BOTH DATA_DIR/lib (so the LD_PRELOAD libs
+        // above resolve) and DATA_DIR/usr/lib (crosvm's own deps). Dropping
+        // DATA_DIR/lib made ld.so fail to preload libsimpledump.so -> execv
+        // ENOENT -> child exit 127 with zero diagnostics.
+        builder.environment("LD_LIBRARY_PATH", fmt("%s:%s",
+            pathJoin(DATA_DIR, "lib"),
+            pathJoin(DATA_DIR, "usr", "lib")));
         applyConfiguredEnvironment(builder);
         builder.maxOpenFiles(65536);
         builder.maxLockedMemory(RLIM_INFINITY);

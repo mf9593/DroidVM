@@ -194,7 +194,12 @@ public final class LinuxNetwork extends BackendBase {
 
     @Override
     public boolean isInterfaceExists(@NonNull String name) {
-        return new File(fmt("/sys/class/net/%s/uevent", name)).exists();
+        // Not sysfs, and not java.net: this ROM's SELinux denies untrusted_app search/read on
+        // /sys/class/net, and the app may not open the netlink socket NetworkInterface uses.
+        // Both answer "no" for a bridge that exists, which made start() skip the stale-bridge
+        // cleanup and then fail with EEXIST. netbox runs as root and is the same authority the
+        // mutations go through.
+        return Netbox.linkExists(name);
     }
 
     @Override

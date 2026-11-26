@@ -32,3 +32,25 @@ local.properties
 # Python bytecode from the scripts/ci checks.
 __pycache__/
 *.pyc
+
+# Local debugging / test scratch (not part of the source tree)
+/out/
+/apkcheck/
+/prebuilt_check/
+/daemon_bin
+/crtest_crosvm
+*.log
+/screenshot*.png
+/screen_vm*.png
+/vmshot.png
+/ui*.xml
+/start_vm.py
+/autotest.sh
+/test_win_vm.sh
+/startline.txt
+
+# Kotlin/Gradle local session caches
+/.kotlin/
+
+# Local-only development record (never published)
+/LOCAL-DEVLOG.md

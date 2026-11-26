@@ -43,6 +43,7 @@ import androidx.annotation.MainThread;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -77,6 +78,18 @@ public abstract class BaseVncActivity extends AppCompatActivity implements ImeIn
      * one. Modes that ride RFB (the tablet pointer, the keyboard) are unaffected either way.
      */
     public static final String EXTRA_INPUT_ENABLED = "input_enabled";
+    /**
+     * The screen's own VNC endpoint, carried from the console router.
+     *
+     * <p>The daemon's {@code vm_vnc_info} is still the authority for the resolved screen and for
+     * the LAN address of a wildcard bind, but it is not needed to open a server bound to this
+     * phone: the router already holds the same {@link VMScreenConfig} and can pass the endpoint
+     * along. Using it first keeps the console working when the daemon connection is reconnecting,
+     * which is exactly when the old request used to sit unanswered forever.</p>
+     */
+    public static final String EXTRA_VNC_HOST = "vnc_host";
+    public static final String EXTRA_VNC_PORT = "vnc_port";
+    public static final String EXTRA_VNC_PASSWORD = "vnc_password";
     protected static final int DEFAULT_PORT = 5900;
     private static final int MAX_RECONNECT_ATTEMPTS = 5;
     private static final long RECONNECT_DELAY_MS = 2000;
@@ -198,6 +211,11 @@ public abstract class BaseVncActivity extends AppCompatActivity implements ImeIn
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // The console is always dark; keep the system bars' icons light even if the device
+        // theme or an OEM overlay would otherwise choose dark icons for a light status bar.
+        var bars = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        bars.setAppearanceLightStatusBars(false);
+        bars.setAppearanceLightNavigationBars(false);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(getContentLayoutId());
         var intent = getIntent();
@@ -300,6 +318,19 @@ public abstract class BaseVncActivity extends AppCompatActivity implements ImeIn
             Log.e(TAG, "No VM ID provided");
             setStatus(getString(R.string.vnc_display_connect_failed), VncStatus.ERROR);
             showConnectingOverlay(getString(R.string.vnc_display_connect_failed));
+            return;
+        }
+        // The router can hand us the screen's own endpoint. Prefer it: a local VNC server does
+        // not need the daemon round-trip, and a daemon connection that is reconnecting must not
+        // leave the console on "connecting" for a server that is already listening.
+        var localHost = getIntent().getStringExtra(EXTRA_VNC_HOST);
+        var localPort = getIntent().getIntExtra(EXTRA_VNC_PORT, 0);
+        if (localHost != null && !localHost.isEmpty() && localPort > 0) {
+            vncHost = "0.0.0.0".equals(localHost) ? "127.0.0.1" : localHost;
+            vncPort = localPort;
+            vncPassword = getIntent().getStringExtra(EXTRA_VNC_PASSWORD);
+            if (vncPassword != null && vncPassword.isEmpty()) vncPassword = null;
+            startVnc();
             return;
         }
         DaemonConnection.OnError err = e -> {

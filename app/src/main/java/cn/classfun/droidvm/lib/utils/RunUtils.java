@@ -17,13 +17,35 @@ import cn.classfun.droidvm.lib.run.RunContext;
 import cn.classfun.droidvm.lib.run.RunResult;
 import cn.classfun.droidvm.lib.run.root.RootRunContext;
 import cn.classfun.droidvm.lib.run.system.SystemRunContext;
+import cn.classfun.droidvm.lib.run.user.UserRunContext;
 
 public final class RunUtils {
     private RunUtils() {
     }
 
+    /** When true, commands run as the current user without su. */
+    private static volatile boolean noRootMode = false;
+
+    /**
+     * Enable or disable no-root mode. When enabled, all shell commands
+     * run as the current user via UserRunContext instead of routing
+     * through su. Commands that need root (bridge creation, TAP setup,
+     * sysctl writes, etc.) will fail — callers should check isNoRootMode()
+     * and skip privileged operations.
+     */
+    public static void setNoRootMode(boolean enabled) {
+        noRootMode = enabled;
+    }
+
+    /** Whether no-root mode is currently active. */
+    public static boolean isNoRootMode() {
+        return noRootMode;
+    }
+
     @NonNull
     private static RunContext getContext() {
+        if (noRootMode)
+            return UserRunContext.getContext();
         return (Os.getuid() == 0) ?
             SystemRunContext.getContext() :
             RootRunContext.getContext();

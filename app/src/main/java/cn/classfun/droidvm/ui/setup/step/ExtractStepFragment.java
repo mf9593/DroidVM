@@ -44,7 +44,7 @@ public final class ExtractStepFragment extends BaseCheckStepFragment {
     }
 
     private void onEvent(@NonNull String type) {
-        if (type.equals("rootCheckDone") && optBoolean("isRoot", false))
+        if (type.equals("rootCheckDone"))
             runOnPool(() -> extractNeeded = needsExtractPrebuilt(activity));
     }
 
@@ -97,7 +97,7 @@ public final class ExtractStepFragment extends BaseCheckStepFragment {
 
     @Override
     public boolean isHiddenStep() {
-        return extractNeeded && !optBoolean("isRoot", false);
+        return false;
     }
 }
 

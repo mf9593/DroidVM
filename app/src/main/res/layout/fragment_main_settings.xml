@@ -9,7 +9,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:paddingBottom="80dp">
+        android:paddingBottom="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -206,6 +206,14 @@
                     android:subtitle="@string/settings_check_update_summary"
                     android:text="@string/settings_check_update_title" />
 
+                <cn.classfun.droidvm.ui.widgets.row.TextRowWidget
+                    android:id="@+id/item_changelog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:icon="@drawable/ic_history"
+                    android:subtitle="@string/settings_changelog_summary"
+                    android:text="@string/settings_changelog_title" />
+
             </cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer>
 
             <cn.classfun.droidvm.ui.widgets.container.CollapsibleContainer
@@ -221,6 +229,14 @@
                     android:icon="@drawable/ic_bug"
                     android:subtitle="@string/settings_feedback_summary"
                     android:text="@string/settings_feedback_title" />
+
+                <cn.classfun.droidvm.ui.widgets.row.TextRowWidget
+                    android:id="@+id/item_open_source"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:icon="@drawable/ic_code"
+                    android:subtitle="@string/settings_open_source_summary"
+                    android:text="@string/settings_open_source_title" />
 
                 <cn.classfun.droidvm.ui.widgets.row.TextRowWidget
                     android:id="@+id/item_license"

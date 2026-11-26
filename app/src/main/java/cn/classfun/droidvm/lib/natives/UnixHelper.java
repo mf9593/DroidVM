@@ -95,13 +95,48 @@ public final class UnixHelper {
     @SuppressLint("UnsafeDynamicallyLoadedCode")
     public static void load() {
         if (loaded) return;
+        // Chain through both known paths, because whether the linker can resolve the
+        // library depends on how this app was installed: some installs expose the
+        // library only via System.loadLibrary (native libs live in the APK, no
+        // extracted nativeLibraryDir), others only as the copy AssetUtils.extractLibraries
+        // puts under <dataDir>/lib (and that copy can be stale or incomplete). Whichever
+        // one works, log the outcome to the daemon's persistent debug file so a silent
+        // "not loaded" never has to be guessed again.
+        // 1) Standard linker namespace: works in all install modes where the APK's
+        //    jni libs are resolvable (including extractNativeLibs=false / APK-direct).
+        try {
+            System.loadLibrary("unixhelper");
+            dbg("libunixhelper loaded via System.loadLibrary");
+            loaded = true;
+            Log.i(TAG, "Loaded native library libunixhelper.so (loadLibrary)");
+            return;
+        } catch (UnsatisfiedLinkError e) {
+            dbg("System.loadLibrary(unixhelper) failed: " + e);
+            Log.e(TAG, "loadLibrary(unixhelper) failed", e);
+        }
+        // 2) The extracted copy under the app's data directory.
         var libPath = pathJoin(DATA_DIR, "lib", LIB_NAME);
         try {
             System.load(libPath);
+            dbg("libunixhelper loaded from " + libPath);
             loaded = true;
             Log.i(TAG, fmt("Loaded native library: %s", libPath));
-        } catch (UnsatisfiedLinkError e) {
+            return;
+        } catch (Throwable e) {
+            dbg("System.load(" + libPath + ") failed: " + e);
             Log.e(TAG, fmt("Failed to load native library: %s", libPath), e);
+        }
+    }
+
+    /** Persistent, on-device diagnostics: same durable file the daemon already writes. */
+    private static void dbg(String msg) {
+        try {
+            var dir = new java.io.File("/storage/emulated/0/DroidVM");
+            if (!dir.exists()) dir.mkdirs();
+            try (var w = new java.io.FileWriter("/storage/emulated/0/DroidVM/daemon-debug.log", true)) {
+                w.write(fmt("[%s] %s\n", java.time.LocalDateTime.now(), msg));
+            }
+        } catch (Exception ignored) {
         }
     }
 

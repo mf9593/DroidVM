@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+     One dated changelog entry. The card matches the rest of the settings-adjacent pages:
+     16dp corners, 1dp outline, no elevation, 12dp between cards.
+-->
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="16dp"
+    android:layout_marginEnd="16dp"
+    android:layout_marginBottom="12dp"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="0dp"
+    app:strokeColor="?attr/colorOutlineVariant"
+    app:strokeWidth="1dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/tv_day_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            android:textColor="?attr/colorPrimary"
+            tools:text="2026-11-25 · Memory, disks and Windows 3D" />
+
+        <TextView
+            android:id="@+id/tv_day_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:lineSpacingExtra="4dp"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="?attr/colorOnSurface"
+            android:textIsSelectable="true"
+            tools:text="• Home: an available-memory row.\n• New free-memory action." />
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

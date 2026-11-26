@@ -9,6 +9,8 @@ import static android.view.View.VISIBLE;
 import static android.widget.Toast.LENGTH_LONG;
 import static android.widget.Toast.LENGTH_SHORT;
 import static cn.classfun.droidvm.lib.Constants.GITHUB_ISSUE_URL;
+import static cn.classfun.droidvm.lib.Constants.GITHUB_REPO_URL;
+import static cn.classfun.droidvm.lib.Constants.GITHUB_UPSTREAM_URL;
 import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
 import static cn.classfun.droidvm.lib.utils.ThreadUtils.runOnPool;
 
@@ -62,6 +64,7 @@ import cn.classfun.droidvm.lib.store.network.NetworkStore;
 import cn.classfun.droidvm.lib.store.vm.VMStore;
 import cn.classfun.droidvm.lib.ui.UIContext;
 import cn.classfun.droidvm.lib.utils.CpuUtils;
+import cn.classfun.droidvm.ui.changelog.ChangelogActivity;
 import cn.classfun.droidvm.ui.disk.create.DiskCompress;
 import cn.classfun.droidvm.ui.disk.operation.OptimizeCompression;
 import cn.classfun.droidvm.ui.hugepage.HugePageActivity;
@@ -107,8 +110,10 @@ public final class MainSettingsFragment extends MainBaseFragment {
     private TextRowWidget itemUsbDevices;
     private TextRowWidget itemCpuAffinity;
     private TextRowWidget itemLicense;
+    private TextRowWidget itemOpenSource;
     private SwitchRowWidget itemAutoCheckUpdate;
     private TextRowWidget itemCheckUpdate;
+    private TextRowWidget itemChangelog;
     private TextRowWidget itemPrivacy;
     private TextRowWidget itemApiManager;
     private TextRowWidget itemHugepageReserve;
@@ -168,8 +173,10 @@ public final class MainSettingsFragment extends MainBaseFragment {
         itemUsbDevices = view.findViewById(R.id.item_usb_devices);
         itemCpuAffinity = view.findViewById(R.id.item_cpu_affinity);
         itemLicense = view.findViewById(R.id.item_license);
+        itemOpenSource = view.findViewById(R.id.item_open_source);
         itemAutoCheckUpdate = view.findViewById(R.id.item_auto_check_update);
         itemCheckUpdate = view.findViewById(R.id.item_check_update);
+        itemChangelog = view.findViewById(R.id.item_changelog);
         itemPrivacy = view.findViewById(R.id.item_privacy);
         itemApiManager = view.findViewById(R.id.item_api_manager);
         itemHugepageReserve = view.findViewById(R.id.item_hugepage_reserve);
@@ -191,6 +198,7 @@ public final class MainSettingsFragment extends MainBaseFragment {
         loadLanguages();
         bindOnClick(itemLanguage, this::showLanguageDialog);
         bindOnClick(itemFeedback, this::openFeedback);
+        bindOnClick(itemOpenSource, this::showOpenSourceDialog);
         bindOnClick(itemLicense, this::showLicenseDialog);
         bindOnClick(itemDaemonStatus, daemon::asyncRefreshDaemonStatus);
         bindOnClick(itemDaemonStart, daemon::asyncStartDaemon);
@@ -209,6 +217,8 @@ public final class MainSettingsFragment extends MainBaseFragment {
         bindOnClick(itemUsbDevices, this::showUsbDevices);
         bindOnChecked(itemAutoCheckUpdate, KEY_AUTO_CHECK_UPDATE, true);
         bindOnClick(itemCheckUpdate, this::checkUpdate);
+        bindOnClick(itemChangelog, () -> startActivity(
+            new Intent(requireContext(), ChangelogActivity.class)));
         bindOnClick(itemPrivacy, this::showPrivacyPolicy);
         bindOnClick(itemApiManager, this::showApiManager);
         bindOnClick(itemHugepageReserve, this::showHugePageReserve);
@@ -472,6 +482,32 @@ public final class MainSettingsFragment extends MainBaseFragment {
 
     private void openFeedback() {
         startActivity(new Intent(ACTION_VIEW, Uri.parse(GITHUB_ISSUE_URL)));
+    }
+
+    /** The fork's provenance and the documents an open-source reader needs, in one place. */
+    private void showOpenSourceDialog() {
+        var items = new CharSequence[]{
+            getString(R.string.settings_open_source_repo),
+            getString(R.string.settings_open_source_upstream),
+            getString(R.string.settings_open_source_changes),
+            getString(R.string.settings_open_source_todo),
+            getString(R.string.settings_open_source_changelog),
+        };
+        new MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.settings_open_source_title)
+            .setItems(items, (dialog, which) -> {
+                String url;
+                switch (which) {
+                    case 0: url = GITHUB_REPO_URL; break;
+                    case 1: url = GITHUB_UPSTREAM_URL; break;
+                    case 2: url = GITHUB_REPO_URL + "/blob/main/FORK.md"; break;
+                    case 3: url = GITHUB_REPO_URL + "/blob/main/TODO.md"; break;
+                    default: url = GITHUB_REPO_URL + "/blob/main/docs/CHANGELOG.md"; break;
+                }
+                startActivity(new Intent(ACTION_VIEW, Uri.parse(url)));
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
     }
 
     private void checkUpdate() {

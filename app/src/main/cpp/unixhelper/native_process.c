@@ -2,9 +2,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
 #include <android/log.h>
@@ -41,6 +43,32 @@ static void close_all_fds_except(int min_fd, const int *keep_fds, int keep_count
 
 #define JNI_PREFIX(name) \
     Java_cn_classfun_droidvm_lib_natives_NativeProcess_##name
+
+/**
+ * The child's exec failed. The old path called _exit(127) with no stderr the
+ * caller reads (the VMM console shows nothing when crosvm is the new process
+ * and the daemon is not attached to a terminal), and logcat is unusable on
+ * userdebug builds. So: capture errno + strerror here, append to a persistent
+ * file the daemon log can read. Only first two RLIMIT names (capability note).
+ */
+static void record_exec_failure(const char *op, const char *path) {
+    int e = errno;
+    const char *str = strerror(e);
+    char buf[512];
+    int n = snprintf(buf, sizeof buf, "[%ld] EXEXEC FAILURE: %s (%s) errno=%d (%s)\n",
+                     (long) getpid(), op ? op : "?", path ? path : "?", e, str);
+    if (n < 0) return;
+    const char *dir = "/storage/emulated/0/DroidVM";
+    mkdir(dir, 0777);
+    char logpath[512];
+    snprintf(logpath, sizeof logpath, "%s/daemon-debug.log", dir);
+    int fd = open(logpath, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd >= 0) {
+        (void)write(fd, buf, (size_t) n);
+        close(fd);
+    }
+}
+
 
 JNIEXPORT jintArray JNICALL
 JNI_PREFIX(nativeForkExec)(
@@ -132,8 +160,10 @@ JNI_PREFIX(nativeForkExec)(
         close_all_fds_except(3, keep_fds + 3, preserve_count);
         for (int i = 0; i < preserve_count; i++)
             set_cloexec((int) preserve_raw[i], 0);
-        if (dir_cstr && chdir(dir_cstr) < 0)
+        if (dir_cstr && chdir(dir_cstr) < 0) {
+            record_exec_failure("chdir", dir_cstr);
             _exit(127);
+        }
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
         sa.sa_handler = SIG_DFL;
@@ -144,13 +174,32 @@ JNI_PREFIX(nativeForkExec)(
             struct rlimit rl;
             rl.rlim_cur = (rlim_t) rlimits_raw[i * 3 + 1];
             rl.rlim_max = (rlim_t) rlimits_raw[i * 3 + 2];
-            if (setrlimit(resource, &rl) < 0)
-                _exit(126);
+            if (setrlimit(resource, &rl) < 0) {
+                /* Best-effort: an unprivileged process has no CAP_SYS_RESOURCE, so it
+                 * cannot change its hard limit at all (raising it to INFINITY or
+                 * lowering NOFILE's 524288 down to 65536 both fail with EPERM). A
+                 * resource cap the child cannot be granted must not silently kill the
+                 * whole launch (the old _exit(126) here made every no-root VM start
+                 * die in ~50ms with no output at all). Retry once within the resource's
+                 * current hard bound: the soft limit can still be raised up to that
+                 * bound, and the hard limit is left exactly as it was. If even that
+                 * is refused, skip the limit -- not fatal, the child proceeds to exec. */
+                struct rlimit cur;
+                if (getrlimit(resource, &cur) < 0)
+                    continue;
+                if (rl.rlim_cur > cur.rlim_max)
+                    rl.rlim_cur = cur.rlim_max;
+                rl.rlim_max = cur.rlim_max;
+                if (setrlimit(resource, &rl) < 0) {
+                    /* skip -- cannot grant more without privileges */
+                }
+            }
         }
         if (envp)
             execve(argv[0], argv, envp);
         else
             execv(argv[0], argv);
+        record_exec_failure(envp ? "execve" : "execv", argv[0]);
         _exit(127);
     }
     close(pipe_stdin[0]);

@@ -55,6 +55,7 @@ public final class DiskInfoSnapshotTab extends DiskInfoBaseTab {
     private RecyclerView recyclerView;
     private TextView tvEmpty;
     private float lastTouchX = 0;
+    private float lastTouchY = 0;
 
     public DiskInfoSnapshotTab(
         @NonNull DiskInfoActivity activity,
@@ -86,8 +87,10 @@ public final class DiskInfoSnapshotTab extends DiskInfoBaseTab {
         recyclerView.addOnItemTouchListener(new RecyclerView.SimpleOnItemTouchListener() {
             @Override
             public boolean onInterceptTouchEvent(@NonNull RecyclerView rv, @NonNull MotionEvent e) {
-                if (e.getActionMasked() == MotionEvent.ACTION_DOWN)
+                if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                     lastTouchX = e.getRawX();
+                    lastTouchY = e.getRawY();
+                }
                 return false;
             }
         });
@@ -274,7 +277,7 @@ public final class DiskInfoSnapshotTab extends DiskInfoBaseTab {
             }
             return false;
         });
-        menu.showAtTouch(lastTouchX, 0);
+        menu.showAtTouch(lastTouchX, lastTouchY);
     }
 
     private void confirmApply(@NonNull String name) {

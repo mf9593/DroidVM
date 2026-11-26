@@ -4,6 +4,11 @@
 
 [简体中文](README.zh.md) | [English](README.md)
 
+> **本分支说明**：本仓库是 [Droid-VM/DroidVM](https://github.com/Droid-VM/DroidVM) 的 fork，
+> 维护在 [mf9593/DroidVM](https://github.com/mf9593/DroidVM)。App 内置更新检查读取本分支的
+> GitHub Releases。修改记录见 [FORK.md](FORK.md)，未完成事项见 [TODO.md](TODO.md)，详细
+> 更新日志见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+
 支持多种 Hypervisor 的 Android 虚拟机管理器，包括高通 Gunyah、联发科 GenieZone 和 Linux KVM。
 
 支持的虚拟化方案：
@@ -16,9 +21,10 @@
 
 ## 资源
 
-- [仓库](https://github.com/Droid-VM/DroidVM)
-- [Wiki](https://github.com/Droid-VM/DroidVM/wiki)
-- [发布](https://github.com/Droid-VM/DroidVM/releases)
+- [本分支](https://github.com/mf9593/DroidVM)
+- [本分支发布](https://github.com/mf9593/DroidVM/releases)
+- [上游](https://github.com/Droid-VM/DroidVM)
+- [分支说明](FORK.md) · [未完成事项](TODO.md) · [更新日志](docs/CHANGELOG.md)
 
 ## 功能
 

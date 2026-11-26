@@ -119,6 +119,22 @@ public final class KernelModuleManager {
     }
 
     /**
+     * Whether the kernel has {@code <name>} loaded, read from its sysfs directory.
+     *
+     * <p>Not every ROM makes {@code /proc/modules} an honest list: KernelSU's SUSFS and similar
+     * hides (which this phone runs) filter both that file and the {@code readdir} of
+     * {@code /sys/module}, so a loaded module looks absent and the UI offers to load it again.
+     * A direct {@code stat} of {@code /sys/module/<name>} is not filtered -- the directory is
+     * still addressable by name -- and is the fallback this asks when the list says no.</p>
+     */
+    private static boolean sysfsLoaded(@NonNull String name) {
+        if (RunUtils.isNoRootMode())
+            return new File("/sys/module", name).isDirectory();
+        return RunUtils.runQuiet("test -d %s", RunUtils.escapedString(
+            pathJoin("/sys/module", name))).isSuccess();
+    }
+
+    /**
      * Shipped modules that apply to this device: the KMI directory selects the ones built for this
      * kernel, {@link KernelModuleMatch} then drops the ones built for a different SoC. Both halves
      * are needed -- a Gunyah module is a matching KMI and a wrong device on a MediaTek phone.
@@ -136,7 +152,8 @@ public final class KernelModuleManager {
             String base = ko.getName().substring(0, ko.getName().length() - 3);
             String name = base.replace('-', '_'); // /proc/modules uses underscores
             if (!KernelModuleMatch.allows(name)) continue;
-            boolean isLoaded = loaded.contains(name);
+            // /proc/modules says no on ROMs that hide modules; /sys/module still answers.
+            boolean isLoaded = loaded.contains(name) || sysfsLoaded(name);
             // Already loaded -- however it got there, autostart is answerable for it now.
             if (isLoaded) VERIFIED.add(name);
             out.add(new Module(name, displayNameFor(name), ko.getAbsolutePath(), isLoaded));
@@ -144,10 +161,45 @@ public final class KernelModuleManager {
         return out;
     }
 
-    /** {@code insmod} the module; true on success. */
+    /**
+     * {@code insmod} the module; true on success. No-root mode always returns false.
+     *
+     * <p>The uid test that used to be here assumed the daemon ran as root. It does not: the
+     * in-process daemon shares the app's uid (untrusted_app), and every privileged command goes
+     * through {@link RunUtils} to libsu. Requiring {@code myUid() == 0} made the load path
+     * impossible on every device -- and a missing {@code gunyah_host_share} is a VM that dies at
+     * GH_VM_START because {@code /dev/gunyah_share} does not exist, which the user sees as a
+     * black screen.</p>
+     */
     public static boolean load(@NonNull String path) {
+        if (RunUtils.isNoRootMode()) return false;
         return RunUtils.run("insmod %s%s", RunUtils.escapedString(path), insmodArgsFor(path))
                 .isSuccess();
+    }
+
+    /**
+     * Loads the shipped module whose file name starts with [prefix] (module-name prefix, e.g.
+     * {@code gunyah_host_share}), unless it is already there. Returns true when it is loaded
+     * afterwards.
+     *
+     * <p>Called by the daemon before a VM start that needs the device node the module creates.
+     * The user should not have to arm autostart for a module whose absence makes the VM fail --
+     * the configuration already says it needs it.</p>
+     */
+    public static boolean ensureLoaded(@NonNull String prefix) {
+        if (RunUtils.isNoRootMode()) return false;
+        var dir = deviceKmiDir();
+        if (dir == null) return false;
+        var filePrefix = prefix.replace('_', '-');
+        var kos = dir.listFiles((d, n) -> n.endsWith(".ko") && n.startsWith(filePrefix));
+        if (kos == null || kos.length == 0) return false;
+        for (var ko : kos) {
+            String name = ko.getName().substring(0, ko.getName().length() - 3)
+                .replace('-', '_');
+            if (sysfsLoaded(name)) return true;
+            if (load(ko.getAbsolutePath())) return true;
+        }
+        return false;
     }
 
     /**
@@ -229,6 +281,7 @@ public final class KernelModuleManager {
      * (the sysfs node is absent), so the default is to do nothing.
      */
     public static void applyAutostart(@NonNull Context ctx) {
+        if (RunUtils.isNoRootMode()) return;
         var enabled = autostartSet(ctx);
         if (enabled.isEmpty()) return;
         for (var mod : list(ctx)) {

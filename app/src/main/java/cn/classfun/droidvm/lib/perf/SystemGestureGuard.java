@@ -17,6 +17,7 @@ import java.util.concurrent.Executors;
 import cn.classfun.droidvm.lib.run.RunContext;
 import cn.classfun.droidvm.lib.run.RunResult;
 import cn.classfun.droidvm.lib.run.root.RootRunContext;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 
 /**
  * Suppresses OEM full-screen touch gestures while a VM display is in the foreground, so
@@ -61,6 +62,7 @@ public final class SystemGestureGuard {
     /** Turns the OEM gestures off; call when the VM display becomes foreground. */
     public static void enterDisplay() {
         executor.execute(() -> {
+            if (RunUtils.isNoRootMode()) return; // Can't change system settings without root
             RunContext shell = RootRunContext.getContext();
             synchronized (suppressed) {
                 // A re-enter without exit (activity recreation) must not re-read "0" as the
@@ -81,6 +83,7 @@ public final class SystemGestureGuard {
     /** Restores whatever {@link #enterDisplay} turned off; call when the display leaves. */
     public static void exitDisplay() {
         executor.execute(() -> {
+            if (RunUtils.isNoRootMode()) return;
             RunContext shell = RootRunContext.getContext();
             synchronized (suppressed) {
                 for (String key : suppressed) {

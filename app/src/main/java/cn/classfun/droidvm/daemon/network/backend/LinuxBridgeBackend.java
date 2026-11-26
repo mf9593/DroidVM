@@ -85,12 +85,24 @@ public final class LinuxBridgeBackend extends BridgeBackend {
 
     @Override
     public void start() throws Exception {
-        if (net.isInterfaceExists(br)) {
+        boolean existed = net.isInterfaceExists(br);
+        try {
+            cn.classfun.droidvm.daemon.Daemon.debugLog(
+                fmt("bridge %s: exists=%b uplinkMode=%s", br, existed, inst.getUplinkMode()));
+        } catch (Exception ignored) {
+        }
+        if (existed) {
             Log.w(TAG, fmt("Interface %s already exists, deleting", br));
             net.deleteBridge(br);
         }
-        if (!net.createBridge(br))
+        boolean created = net.createBridge(br);
+        if (!created) {
+            try {
+                cn.classfun.droidvm.daemon.Daemon.debugLog(fmt("bridge %s: create failed", br));
+            } catch (Exception ignored) {
+            }
             throw new RuntimeException(fmt("Failed to create bridge %s", br));
+        }
         var mac = resolveBridgeMac();
         if (!net.setMacAddress(br, mac))
             Log.w(TAG, fmt("Failed to set MAC %s on %s", mac, br));
@@ -140,7 +152,13 @@ public final class LinuxBridgeBackend extends BridgeBackend {
             || UplinkResolver.assumeDontBridge(uplink);
         if (pseudo) {
             pbridge = new Pbridge(uplink, br);
-            if (!pbridge.start())
+            boolean started = pbridge.start();
+            try {
+                cn.classfun.droidvm.daemon.Daemon.debugLog(fmt(
+                    "L2 uplink %s -> %s pseudo=%b pbridge=%b", configured, uplink, true, started));
+            } catch (Exception ignored) {
+            }
+            if (!started)
                 throw new RuntimeException(fmt(
                     "Failed to start pseudo-bridge on %s", uplink));
         } else {

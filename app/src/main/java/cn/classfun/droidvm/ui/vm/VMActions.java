@@ -49,6 +49,7 @@ import cn.classfun.droidvm.lib.store.base.DataItem;
 import cn.classfun.droidvm.lib.store.disk.DiskStore;
 import cn.classfun.droidvm.lib.store.vm.BootConfig;
 import cn.classfun.droidvm.lib.utils.ImageUtils;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 import cn.classfun.droidvm.ui.disk.action.BackingChainLinker;
 import cn.classfun.droidvm.ui.disk.tree.DiskTree;
 import cn.classfun.droidvm.lib.store.vm.LendMthpMode;
@@ -83,6 +84,33 @@ public final class VMActions {
     }
 
     public static void createAndStart(
+        @NonNull VMConfig config,
+        @NonNull Handler mainHandler,
+        @NonNull UIContext ui,
+        @NonNull AtomicBoolean wantOpenConsole,
+        @Nullable ConvertLauncher convertLauncher
+    ) {
+        // Wrap the entire guard chain in try/catch so any unexpected exception
+        // shows a dialog instead of crashing the app.
+        try {
+        createAndStartInner(config, mainHandler, ui, wantOpenConsole, convertLauncher);
+        } catch (Exception e) {
+            Log.e(TAG, "createAndStart crashed", e);
+            mainHandler.post(() -> {
+                if (ui.isAlive()) {
+                    new MaterialAlertDialogBuilder(ui.getContext())
+                        .setTitle(R.string.vm_start_error_title)
+                        .setMessage(ui.getContext().getString(R.string.vm_start_error_message,
+                            e.getClass().getSimpleName(),
+                            e.getMessage() != null ? e.getMessage() : "Unknown"))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+                }
+            });
+        }
+    }
+
+    private static void createAndStartInner(
         @NonNull VMConfig config,
         @NonNull Handler mainHandler,
         @NonNull UIContext ui,
@@ -365,6 +393,10 @@ public final class VMActions {
         @NonNull UIContext ui,
         @NonNull Runnable proceed
     ) {
+        if (RunUtils.isNoRootMode()) {
+            mainHandler.post(proceed);
+            return;
+        }
         var appContext = ui.getContext().getApplicationContext();
         runOnPool(() -> {
             List<KernelModulePreflight.Missing> missing;
@@ -969,6 +1001,7 @@ public final class VMActions {
         @NonNull AtomicBoolean wantOpenConsole,
         @Nullable String bootEntry
     ) {
+        try {
         // migrated / decoupled NICs may have a static lease enabled but no
         // offset yet; assign a conflict-free one (and persist it) before the
         // config is pushed to the daemon, which never allocates offsets itself
@@ -1008,6 +1041,20 @@ public final class VMActions {
             .onUnsuccessful(f)
             .onError(err)
             .invoke();
+        } catch (Exception e) {
+            Log.e(TAG, "doCreateAndStart crashed", e);
+            mainHandler.post(() -> {
+                if (ui.isAlive()) {
+                    new MaterialAlertDialogBuilder(ui.getContext())
+                        .setTitle(R.string.vm_start_error_title)
+                        .setMessage(ui.getContext().getString(R.string.vm_start_error_message,
+                            e.getClass().getSimpleName(),
+                            e.getMessage() != null ? e.getMessage() : "Unknown"))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+                }
+            });
+        }
     }
 
     public static void sendCommand(

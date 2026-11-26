@@ -29,6 +29,7 @@ import cn.classfun.droidvm.lib.store.network.NetworkConfig;
 import cn.classfun.droidvm.lib.store.network.NetworkState;
 import cn.classfun.droidvm.lib.store.vm.VMNicConfig;
 import cn.classfun.droidvm.lib.store.vm.VMState;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 
 @SuppressWarnings({"unused", "BooleanMethodIsAlwaysInverted"})
 public final class NetworkInstance extends NetworkConfig {
@@ -85,6 +86,13 @@ public final class NetworkInstance extends NetworkConfig {
             Log.w(TAG, fmt("Network %s not stopped, cannot start", getName()));
             return false;
         }
+        // No-root mode: can't create TAP interfaces or bridges (needs CAP_NET_ADMIN).
+        // crosvm uses built-in SLIRP user-mode networking instead.
+        if (RunUtils.isNoRootMode()) {
+            Log.i(TAG, fmt("No-root mode: skipping network %s (SLIRP handles networking)", getName()));
+            state = NetworkState.STOPPED;
+            return false;
+        }
         try {
             state = NetworkState.STARTING;
             backend = createBackend();
@@ -97,6 +105,15 @@ public final class NetworkInstance extends NetworkConfig {
             return true;
         } catch (Exception e) {
             Log.e(TAG, fmt("Failed to start network %s", getName()), e);
+            // Logcat is not readable on every ROM (this one filters app logs), and "failed to
+            // start network" on its own names neither the step nor the errno. Put the reason
+            // where the daemon log already lives.
+            try {
+                cn.classfun.droidvm.daemon.Daemon.debugLog(
+                    "Network " + getName() + " start failed: " + e);
+                cn.classfun.droidvm.daemon.Daemon.debugLog(Log.getStackTraceString(e));
+            } catch (Exception ignored) {
+            }
             if (backend != null) {
                 try {
                     backend.stop();

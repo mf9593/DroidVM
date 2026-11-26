@@ -107,6 +107,6 @@ public final class VirtualizationStepFragment extends BaseCheckStepFragment {
 
     @Override
     public boolean isHiddenStep() {
-        return !optBoolean("isRoot", false);
+        return false;
     }
 }

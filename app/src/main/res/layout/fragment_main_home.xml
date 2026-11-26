@@ -9,7 +9,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:paddingBottom="80dp">
+        android:paddingBottom="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -242,6 +242,165 @@
                 </LinearLayout>
 
             </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_runtime"
+                style="?attr/materialCardViewFilledStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/home_runtime_title"
+                        android:textAppearance="?attr/textAppearanceLabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:id="@+id/iv_root_status"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:contentDescription="@string/home_runtime_root"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_shield"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:layout_width="72dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:text="@string/home_runtime_root"
+                            android:textAppearance="?attr/textAppearanceBodyMedium"
+                            android:textColor="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:id="@+id/tv_root_status"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:ellipsize="end"
+                            android:singleLine="true"
+                            android:text="@string/home_root_unknown"
+                            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:id="@+id/iv_virt_status"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:contentDescription="@string/home_runtime_virtualization"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_cpu"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:layout_width="72dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:text="@string/home_runtime_virtualization"
+                            android:textAppearance="?attr/textAppearanceBodyMedium"
+                            android:textColor="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:id="@+id/tv_virt_status"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:ellipsize="end"
+                            android:singleLine="true"
+                            android:text="@string/home_virt_none"
+                            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:id="@+id/iv_huge_status"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:contentDescription="@string/home_runtime_huge"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_memory"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:layout_width="72dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:text="@string/home_runtime_huge"
+                            android:textAppearance="?attr/textAppearanceBodyMedium"
+                            android:textColor="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:id="@+id/tv_huge_status"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:ellipsize="end"
+                            android:singleLine="true"
+                            android:text="@string/home_huge_none"
+                            android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_release_huge"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:minHeight="40dp"
+                            android:text="@string/home_huge_release" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_acquire_huge"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:layout_weight="1"
+                            android:minHeight="40dp"
+                            android:text="@string/home_huge_acquire" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </com.google.android.material.card.MaterialCardView>
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/card_update"

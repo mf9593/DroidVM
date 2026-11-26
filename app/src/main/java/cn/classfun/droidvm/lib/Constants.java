@@ -24,7 +24,19 @@ public final class Constants {
     public static final String PATH_EDK2_VARS = pathJoin(DATA_DIR, "/usr/share/droidvm/edk2-gunyah.vars.fd");
     /** crosvm arm64 pflash window: AARCH64_PLATFORM_MMIO_SIZE (8 MiB). */
     public static final long PFLASH_MAX_SIZE = 8L * 1024 * 1024;
-    public static final String GITHUB_ISSUE_URL = "https://github.com/Droid-VM/DroidVM/issues";
+    /**
+     * GitHub repository this fork publishes releases and issues to. The update checker reads
+     * {@code /repos/<owner>/<repo>/releases/latest}, so a release must exist and its tag must be
+     * a version (for example {@code v1.0.1}); the first asset ending in {@code .apk} is offered
+     * for download. Change the two values below if the repository is named differently.
+     */
+    public static final String GITHUB_OWNER = "mf9593";
+    public static final String GITHUB_REPO = "DroidVM";
+    public static final String GITHUB_REPO_URL =
+        "https://github.com/" + GITHUB_OWNER + "/" + GITHUB_REPO;
+    /** The project this fork came from, kept for attribution and upstream bug reports. */
+    public static final String GITHUB_UPSTREAM_URL = "https://github.com/Droid-VM/DroidVM";
+    public static final String GITHUB_ISSUE_URL = GITHUB_REPO_URL + "/issues";
     // droidvm + daemon are CMake-built and shipped as APK assets. The
     // third-party daemons (gvswitch/pbridge/bridgedhcp/netbox) and lbx now
     // arrive via the prebuilt tar.xz, extracted to DATA/bin/<name>.

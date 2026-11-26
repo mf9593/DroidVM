@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(droidvm LANGUAGES C CXX ASM)
 
+# Android 15+ requires all native libraries to be 16KB page aligned.
+# Link with max-page-size=16384 so LOAD segments align to 0x4000.
+add_link_options("-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
+
 set(SHARED_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/jsoncpp/include
 )
@@ -100,6 +104,11 @@ set(WITH_SASL     OFF CACHE BOOL "" FORCE)
 set(WITH_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WITH_TESTS    OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LIBVNCSERVER_DIR} libvncserver)
+
+# Android packages only files ending in .so; the upstream SOVERSION would produce
+# libvncclient.so.1, which Gradle silently drops, leaving vnc_jni's DT_NEEDED
+# unsatisfied. Drop the versioned SONAME so the one file is libvncclient.so.
+# vncclient is STATIC: no SONAME / DT_NEEDED; the client code is linked into vnc_jni.
 
 add_library(vnc_jni SHARED
     vnc/vncclient_jni.c

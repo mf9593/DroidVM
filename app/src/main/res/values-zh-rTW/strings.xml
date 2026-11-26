@@ -305,6 +305,7 @@
     <string name="create_vm_display_refresh_rate">重新整理率 (Hz)</string>
     <string name="create_vm_display_poll_hz">輪詢率 (Hz)</string>
     <string name="create_vm_display_resolution">解析度</string>
+    <string name="create_vm_display_simplefb_fixed">解析度在 VM 啟動時固定，guest 內無法變更；修改後需重新啟動 VM。</string>
     <string name="create_vm_display_size_fmt">%1$d x %2$d</string>
     <string name="create_vm_display_rate_fmt">%1$d Hz</string>
     <string name="create_vm_display_custom">自訂…</string>
@@ -524,6 +525,8 @@
     <string name="license_detail_urls">連結</string>
 
     <string name="vm_daemon_error">與守護程序通訊失敗。</string>
+    <string name="vm_start_error_title">虛擬機啟動失敗</string>
+    <string name="vm_start_error_message">啟動虛擬機時發生錯誤：%1$s（%2$s）</string>
     <string name="vm_compressed_disk_title">壓縮的磁碟映像</string>
     <string name="vm_compressed_disk_message">crosvm 無法讀取壓縮的 qcow2 映像——啟動時會出現磁碟 I/O 錯誤且找不到分割槽表。要先轉換成非壓縮再啟動嗎？\n%1$s</string>
     <string name="vm_compressed_disk_convert">轉換並啟動</string>

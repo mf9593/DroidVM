@@ -167,6 +167,17 @@ final class DisplayProvider {
         group.addView(view, idx, lp);
     }
 
+    /** Diagnostics to the app's private files dir; logcat is unreliable on this device. */
+    private void dbg(String msg) {
+        try {
+            var f = new java.io.File(mainView.getContext().getFilesDir(), "native-display-debug.log");
+            try (var w = new java.io.FileWriter(f, true)) {
+                w.write(System.currentTimeMillis() + " DisplayProvider: " + msg + "\n");
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private void fetchBinder() {
         if (!fetching.compareAndSet(false, true)) return;
         executor.submit(() -> {
@@ -179,8 +190,10 @@ final class DisplayProvider {
                         binder = binderProvider.get();
                     } catch (Exception e) {
                         Log.e(TAG, "binderProvider threw", e);
+                        dbg("binderProvider threw " + e);
                         binder = null;
                     }
+                    dbg("binderProvider -> " + (binder != null ? binder.getClass().getName() : "null"));
                     if (binder != null) {
                         final IBinder got = binder;
                         mainHandler.post(() -> onBinderReady(got));
@@ -207,6 +220,7 @@ final class DisplayProvider {
 
     private void onBinderReady(@NonNull IBinder binder) {
         Log.i(TAG, "got crosvm display binder");
+        dbg("onBinderReady " + binder.getClass().getName());
         displayService = ICrosvmAndroidDisplayService.Stub.asInterface(binder);
         try {
             binder.linkToDeath(deathRecipient, 0);
@@ -231,6 +245,7 @@ final class DisplayProvider {
             trySendCursorSurface(cursorView.getHolder());
         }
 
+        dbg("onConnected true");
         onConnected.accept(true);
         applyPendingSurface();
         startConfigPoll(displayService);
@@ -274,6 +289,7 @@ final class DisplayProvider {
     }
 
     private void applyPendingSurface() {
+        dbg("applyPendingSurface service=" + (displayService != null) + " needsSend=" + needsSend);
         if (displayService == null || !needsSend) return;
         trySendSurface(mainView.getHolder());
     }
@@ -284,19 +300,23 @@ final class DisplayProvider {
         Surface surface = holder.getSurface();
         if (surface == null || !surface.isValid()) {
             Log.w(TAG, "main surface not valid - skipping");
+            dbg("surface invalid");
             return;
         }
         try {
             svc.setSurface(surface, false);
+            dbg("setSurface ok");
             markSent();
         } catch (IllegalArgumentException e) {
             // KNOWN/BENIGN: the reference TerminalApp DisplayProvider documents that setSurface
             // throws IllegalArgumentException from the binder reply path even though crosvm DID
             // receive and configure the surface. Treat as delivered.
             Log.w(TAG, "setSurface: IllegalArgumentException (known/benign) - treating as delivered");
+            dbg("setSurface IllegalArgumentException");
             markSent();
         } catch (Exception e) {
             Log.e(TAG, "setSurface failed", e);
+            dbg("setSurface failed " + e);
         }
     }
 

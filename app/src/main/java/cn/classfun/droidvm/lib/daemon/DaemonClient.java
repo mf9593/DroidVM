@@ -10,6 +10,8 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import cn.classfun.droidvm.daemon.Daemon;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -56,10 +58,12 @@ public final class DaemonClient {
     }
 
     public void connect(int port) throws IOException {
-        var addr = InetAddress.getLocalHost();
+        Daemon.debugLog("DaemonClient.connect: connecting to port " + port);
+        var addr = InetAddress.getByName("127.0.0.1");
         var sockAddr = new InetSocketAddress(addr, port);
         socket = new Socket();
         socket.connect(sockAddr);
+        Daemon.debugLog("DaemonClient.connect: TCP connected");
         in = socket.getInputStream();
         out = socket.getOutputStream();
         this.proto = new Protocol(in, out);

@@ -3,6 +3,7 @@
 // Additional permissions apply; see ADDITIONAL-PERMISSIONS in the repository root.
 package cn.classfun.droidvm.ui.main.vm;
 
+import static cn.classfun.droidvm.lib.utils.ThreadUtils.runOnPool;
 import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
 
 import android.app.Activity;
@@ -18,12 +19,15 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import cn.classfun.droidvm.DroidVMApp;
 import cn.classfun.droidvm.R;
 import cn.classfun.droidvm.lib.daemon.ForegroundCallback;
+import cn.classfun.droidvm.lib.store.vm.VMAutoDetect;
 import cn.classfun.droidvm.lib.store.vm.VMConfig;
 import cn.classfun.droidvm.lib.store.vm.VMState;
 import cn.classfun.droidvm.lib.store.vm.VMStore;
@@ -40,7 +44,19 @@ import cn.classfun.droidvm.ui.vm.pkg.imports.VMPkgImportActivity;
 public final class MainVMFragment
     extends MainStatefulFragment<VMConfig, VMStore, VMAdapter, VMState>
     implements ForegroundCallback {
+    /**
+     * How long a VM must stay RUNNING before its console is opened.
+     *
+     * <p>crosvm reports a successful spawn and the daemon flips to RUNNING before the guest has
+     * done anything; a start that fails in the first seconds (missing kernel module, a --gpu
+     * value this build rejects) then leaves the display activity sitting on a black Surface.
+     * A short grace period lets the exit arrive first; any non-running state in the window
+     * withdraws the open.</p>
+     */
+    private static final long CONSOLE_OPEN_GRACE_MS = 2500;
     private final AtomicBoolean wantOpenConsole = new AtomicBoolean(false);
+    /** VMs whose console open is waiting out the grace period above. */
+    private final Set<UUID> pendingConsoleOpen = ConcurrentHashMap.newKeySet();
     // Pre-start convert (decompress a crosvm-unreadable qcow2): run this once
     // the convert Activity returns RESULT_OK.
     @Nullable
@@ -122,6 +138,22 @@ public final class MainVMFragment
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        // Auto-detect VM disk images in the shared DroidVM directory.
+        // super.onResume() already called refreshView(); if this finds new
+        // disks, refresh again so they appear in the list.
+        runOnPool(() -> {
+            var tempStore = new VMStore();
+            tempStore.load(requireContext());
+            var newVMs = VMAutoDetect.scanAndImport(requireContext(), tempStore);
+            if (!newVMs.isEmpty()) {
+                mainHandler.post(this::refreshView);
+            }
+        });
+    }
+
+    @Override
     public void onStop() {
         super.onStop();
         var app = (DroidVMApp) requireActivity().getApplication();
@@ -142,7 +174,14 @@ public final class MainVMFragment
                 if (config == null) return;
                 // Same routing as the VM-info console button (native -> VNC ->
                 // serial), so a VNC/native VM auto-opens its display, not always UART.
-                VMConsoleRouter.openDefault(requireContext(), vmId, config, true);
+                // Held back briefly: an immediate crash used to leave a black display open.
+                if (!pendingConsoleOpen.add(vmId)) return;
+                mainHandler.postDelayed(() -> {
+                    if (!isAdded() || !pendingConsoleOpen.remove(vmId)) return;
+                    VMConsoleRouter.openDefault(requireContext(), vmId, config, true);
+                }, CONSOLE_OPEN_GRACE_MS);
+            } else if (state != VMState.RUNNING) {
+                pendingConsoleOpen.remove(vmId);
             }
         });
     }

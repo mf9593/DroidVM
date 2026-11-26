@@ -4,6 +4,7 @@
 package cn.classfun.droidvm.ui.logs;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static cn.classfun.droidvm.daemon.Daemon.DEBUG_LOG;
 import static cn.classfun.droidvm.daemon.Daemon.LOG_PATH;
 import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
 
@@ -37,6 +38,7 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import cn.classfun.droidvm.R;
+import cn.classfun.droidvm.lib.daemon.DaemonHelper;
 import cn.classfun.droidvm.lib.utils.ShareUtils;
 
 public final class LogsActivity extends AppCompatActivity {
@@ -45,6 +47,8 @@ public final class LogsActivity extends AppCompatActivity {
 
     private RecyclerView recyclerView;
     private LogAdapter adapter;
+    /** Whichever log this install actually writes: external daemon or in-process debug log. */
+    private String logPath;
     private RandomAccessFile logFile;
     private Thread readerThread;
     private final ByteArrayOutputStream lineBuf = new ByteArrayOutputStream(8192);
@@ -86,13 +90,23 @@ public final class LogsActivity extends AppCompatActivity {
                 }
             }
         });
-        if (new File(LOG_PATH).exists())
+        // The in-process daemon (the normal case on this build) writes the cross-adb debug log;
+        // LOG_PATH is only created by the external daemon process. Show whichever exists instead
+        // of telling the user the daemon is missing while it is actually running.
+        if (new File(LOG_PATH).exists()) logPath = LOG_PATH;
+        else if (new File(DEBUG_LOG).exists()) logPath = DEBUG_LOG;
+        if (logPath != null) {
             startLogcat();
-        else new MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.logs_not_found_title)
-            .setMessage(R.string.logs_not_found_message)
-            .setPositiveButton(android.R.string.ok, null)
-            .show();
+        } else {
+            boolean running = DaemonHelper.isDaemonRunning();
+            new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.logs_not_found_title)
+                .setMessage(running
+                    ? R.string.logs_not_found_message_running
+                    : R.string.logs_not_found_message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+        }
     }
 
     private boolean onMenuItemClick(@NonNull MenuItem item) {
@@ -169,7 +183,7 @@ public final class LogsActivity extends AppCompatActivity {
         }
         updated.set(false);
         try {
-            logFile = new RandomAccessFile(LOG_PATH, "r");
+            logFile = new RandomAccessFile(logPath, "r");
             logFile.seek(0);
         } catch (Exception e) {
             var lines = new ArrayList<String>();

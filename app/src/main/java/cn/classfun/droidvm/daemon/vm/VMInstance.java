@@ -26,8 +26,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import cn.classfun.droidvm.daemon.Daemon;
 import cn.classfun.droidvm.daemon.console.ConsoleStream;
 import cn.classfun.droidvm.daemon.vm.backend.BackendBase;
+import cn.classfun.droidvm.lib.utils.RunUtils;
 import cn.classfun.droidvm.lib.data.CrosvmExit;
 import cn.classfun.droidvm.lib.hugepage.PoolPreflight;
 import cn.classfun.droidvm.lib.natives.NativeProcess;
@@ -222,10 +224,20 @@ public final class VMInstance extends VMConfig {
             if (state != VMState.STOPPED && state != VMState.REBOOTING) {
                 Log.w(TAG, fmt("VM %s is not stopped (state=%s), cannot start",
                     getId(), state.name()));
+                try {
+                    Daemon.debugLog("VM " + getName() + " start denied: state=" + state);
+                } catch (Exception ignored) {
+                }
                 return false;
             }
             joinThreads(1000);
-            if (!setupTaps()) return false;
+            if (!setupTaps()) {
+                try {
+                    Daemon.debugLog("VM " + getName() + " start denied: setupTaps failed");
+                } catch (Exception ignored) {
+                }
+                return false;
+            }
             resolveVncConfig();
             stoppedByUser = false;
             exitCode = -1;
@@ -234,6 +246,10 @@ public final class VMInstance extends VMConfig {
             workerThread = new Thread(this::runVM, fmt("VM-%s", vmIdStr));
             workerThread.setDaemon(true);
             workerThread.start();
+            try {
+                Daemon.debugLog("VM " + getName() + " worker VM-" + vmIdStr + " launched, state=STARTING");
+            } catch (Exception ignored) {
+            }
             Log.i(TAG, fmt(
                 "Start requested for VM: %s [%s] via %s",
                 getName(), vmIdStr, getBackend().name()
@@ -273,6 +289,16 @@ public final class VMInstance extends VMConfig {
     private boolean setupTaps() {
         var nets = item.opt("networks", DataItem.newArray());
         if (nets.isEmpty()) return true;
+        // The daemon always runs in-process on Android 17, but that says nothing about
+        // privilege: in root mode the netbox helper still runs through libsu, and it is the
+        // only thing that can create the TAP the guest's NIC needs. Skipping TAP setup just
+        // because the daemon shares the app's process is what left every VM without --net.
+        // The crosvm prebuilt has no SLIRP backend (its --net accepts tap-name/tap-fd only),
+        // so no-root mode has no fallback either -- say so instead of pretending.
+        if (RunUtils.isNoRootMode()) {
+            Log.w(TAG, fmt("No-root mode: skipping TAP setup for VM %s (this crosvm has no SLIRP)", getId()));
+            return true;
+        }
         if (store.networkStore == null) {
             Log.e(TAG, fmt("VM %s has networks but no network store", getId()));
             return false;
@@ -455,11 +481,20 @@ public final class VMInstance extends VMConfig {
         var inst = getBackendInstance();
         var vmId = getId().toString();
         try {
+            Daemon.debugLog("VM " + getName() + " runVM start (backend=" + inst.getClass().getSimpleName() + ")");
+        } catch (Exception ignored) {
+        }
+        try {
             // image-source boot runs lbx here (scan + cached extract), so
             // backends only ever see resolved kernel/initrd/cmdline paths
             bootPlan = BootPlan.resolve(this, bootEntryOverride);
         } catch (Exception e) {
             Log.e(TAG, fmt("VM %s: boot resolution failed", getName()), e);
+            try {
+                Daemon.debugLog("VM " + getName() + ": boot resolution failed: " + e);
+                Daemon.debugLog(android.util.Log.getStackTraceString(e));
+            } catch (Exception ignored) {
+            }
             var sio = getStream("stdio");
             if (sio != null)
                 sio.appendBuffer(fmt("boot resolution failed: %s\n", e.getMessage()));
@@ -480,6 +515,10 @@ public final class VMInstance extends VMConfig {
             result = new VMStartResult();
             result.setProcess(null);
         }
+        try {
+            Daemon.debugLog("VM " + getName() + ": start result success=" + result.isSuccess());
+        } catch (Exception ignored) {
+        }
         if (!result.isSuccess()) {
             exitCode = -1;
             setState(VMState.STOPPED);
@@ -496,6 +535,10 @@ public final class VMInstance extends VMConfig {
         long ranFrom = System.currentTimeMillis();
         int code = process.waitFor();
         long ranForMs = System.currentTimeMillis() - ranFrom;
+        try {
+            Daemon.debugLog("VM " + getName() + ": crosvm exited code=" + code + " ran=" + ranForMs + "ms");
+        } catch (Exception ignored) {
+        }
         for (var stream : inst.streams.values()) {
             var reader = stream.getReaderThread();
             if (reader != null && reader.isAlive()) {
@@ -504,6 +547,26 @@ public final class VMInstance extends VMConfig {
                 } catch (InterruptedException ignored) {
                 }
             }
+        }
+        // Capture stderr/stdout for failed starts: crosvm may exit in ~50ms
+        // (dominated by the dynamic linker failing to resolve a DT_NEEDED
+        // lib) and the output is what names the missing library. The
+        // reader threads above ran in parallel; after join their ring
+        // buffers hold whatever crosvm wrote before exiting.
+        try {
+            if (code != 0) {
+                var stderr = inst.streams.get("stderr");
+                var stdout = inst.streams.get("stdout");
+                var stderrBuf = stderr != null ? stderr.getBuffer() : "";
+                var stdoutBuf = stdout != null ? stdout.getBuffer() : "";
+                Daemon.debugLog(fmt("VM %s: exit code=%d (ran=%dms), stdout=%d bytes, stderr=%d bytes\n",
+                    getName(), code, ranForMs, stdoutBuf.length(), stderrBuf.length()));
+                if (!stderrBuf.isBlank())
+                    Daemon.debugLog("VM %s stderr:\n" + stderrBuf);
+                if (!stdoutBuf.isBlank())
+                    Daemon.debugLog("VM %s stdout:\n" + stdoutBuf);
+            }
+        } catch (Exception ignored) {
         }
         process = null;
         exitCode = code;
@@ -692,6 +755,16 @@ public final class VMInstance extends VMConfig {
                 addStreamData(streamName, buf, n);
                 if (streamName.equals("stdout") || streamName.equals("stderr"))
                     addStreamData("stdio", buf, n);
+                // TEMP DIAGNOSTIC: surface crosvm (and guest) text on the stderr stream into
+                // the persistent daemon log -- the console view only keeps the last screenful
+                // and the battery of logcat we cannot read never sees the process's last words.
+                if (streamName.equals("stderr")) {
+                    try {
+                        Daemon.debugLog("VM " + getName() + " " + streamName + ": " +
+                            new String(buf, 0, n, java.nio.charset.StandardCharsets.UTF_8).trim());
+                    } catch (Exception ignored) {
+                    }
+                }
             }
         } catch (Exception e) {
             Log.d(TAG, fmt("Stream reader %s for VM %s ended: %s", streamName, vmId, e.getMessage()));

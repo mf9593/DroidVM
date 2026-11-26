@@ -90,14 +90,14 @@
             android:name=".ui.vm.display.vnc.display.VMVncDisplayActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
             android:exported="false"
-            android:theme="@style/Theme.DroidVM.NoActionBar.Dark"
+            android:theme="@style/Theme.DroidVM.Vnc"
             android:windowSoftInputMode="adjustNothing" />
 
         <activity
             android:name=".ui.vm.display.vnc.display.VMVncPresentationActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
             android:exported="false"
-            android:theme="@style/Theme.DroidVM.NoActionBar.Dark"
+            android:theme="@style/Theme.DroidVM.Vnc"
             android:windowSoftInputMode="adjustNothing" />
 
         <activity
@@ -227,6 +227,13 @@
 
         <activity
             android:name=".ui.logs.LogsActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
+            android:exported="false"
+            android:theme="@style/Theme.DroidVM.NoActionBar"
+            android:windowSoftInputMode="adjustNothing" />
+
+        <activity
+            android:name=".ui.changelog.ChangelogActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
             android:exported="false"
             android:theme="@style/Theme.DroidVM.NoActionBar"

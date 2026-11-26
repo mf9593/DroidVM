@@ -38,6 +38,7 @@ public abstract class MainListFragment<
     protected LinearLayout layoutEmpty;
     protected final Class<A> adapterClass;
     private float lastTouchX = 0;
+    private float lastTouchY = 0;
 
     public MainListFragment(@NonNull Class<A> adapterClass) {
         super();
@@ -70,7 +71,7 @@ public abstract class MainListFragment<
         pop.inflate(getItemMenuResId(config));
         onPrepareItemMenu(config, pop);
         pop.setOnMenuItemClickListener(item -> onMenuClicked(config, item));
-        pop.showAtTouch(lastTouchX, 0);
+        pop.showAtTouch(lastTouchX, lastTouchY);
         return true;
     }
 
@@ -102,8 +103,10 @@ public abstract class MainListFragment<
         rvList.addOnItemTouchListener(new RecyclerView.SimpleOnItemTouchListener() {
             @Override
             public boolean onInterceptTouchEvent(@NonNull RecyclerView rv, @NonNull MotionEvent e) {
-                if (e.getActionMasked() == MotionEvent.ACTION_DOWN)
+                if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                     lastTouchX = e.getRawX();
+                    lastTouchY = e.getRawY();
+                }
                 return false;
             }
         });

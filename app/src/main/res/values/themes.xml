@@ -24,6 +24,19 @@
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 
+    <!-- The VNC console is a dark surface by construction (black video, dark status row).
+         It must be a real dark Material theme, not just black system-bar colours: from
+         Android 15 on the system bar colour is ignored under edge-to-edge, and a DayNight
+         parent would leave the window background light behind white status icons. -->
+    <style name="Theme.DroidVM.Vnc" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.DroidVM.AlertDialog</item>
+        <item name="android:windowBackground">@color/vnc_status_bar_background</item>
+        <item name="android:statusBarColor">@color/vnc_status_bar_background</item>
+        <item name="android:navigationBarColor">@color/vnc_status_bar_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
     <style name="Theme.DroidVM.Splash" parent="Theme.DroidVM.NoActionBar">
         <item name="android:windowBackground">?attr/colorPrimary</item>
         <item name="android:statusBarColor">?attr/colorPrimary</item>

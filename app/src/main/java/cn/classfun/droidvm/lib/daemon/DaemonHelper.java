@@ -18,6 +18,11 @@ import static cn.classfun.droidvm.lib.utils.RunUtils.run;
 import static cn.classfun.droidvm.lib.utils.StringUtils.fmt;
 import static cn.classfun.droidvm.lib.utils.StringUtils.pathJoin;
 import static cn.classfun.droidvm.lib.utils.ThreadUtils.runOnPool;
+
+import java.util.HashMap;
+import java.io.File;
+
+import cn.classfun.droidvm.lib.utils.RunUtils;
 import static cn.classfun.droidvm.lib.utils.ThreadUtils.threadSleepOrKill;
 
 import android.os.Handler;
@@ -101,7 +106,7 @@ public final class DaemonHelper {
     }
 
     public static boolean isDaemonRunning() {
-        return readPid() != -1;
+        return Daemon.isRunningInProcess() || readPid() != -1;
     }
 
     @Nullable
@@ -128,55 +133,73 @@ public final class DaemonHelper {
      * running one and takes over -- used for restart.
      */
     public boolean startDaemon(boolean force) {
-        var zipPath = getDaemonZipPath();
-        Log.i(TAG, fmt("Starting daemon via app_process64 with %s (force=%b)", zipPath, force));
+        Log.i(TAG, fmt("Starting daemon (force=%b)", force));
         var runDir = pathJoin(DATA_DIR, "run");
         var uid = Process.myUid();
         run("mkdir -p %s", runDir);
         // Best-effort ownership fix; chown may be denied on some contexts (e.g. Android).
         run("chown %d:%d %s || true", uid, uid, runDir);
-        var libPath = fmt(
-            "%s:%s",
-            ctx.getContext().getApplicationInfo().nativeLibraryDir,
-            pathJoin(DATA_DIR, "lib")
-        );
-        var cmd = fmt(
-            "env CLASSPATH=%s LD_LIBRARY_PATH=%s %s %s / %s%s",
-            escapedString(zipPath),
-            escapedString(libPath),
-            escapedString(getAssetBinaryPath("daemon")),
-            escapedString(findExecute("app_process64")),
-            escapedString(Daemon.class.getName()),
-            force ? " --force" : ""
-        );
-        Log.i(TAG, fmt("Running command: %s", cmd));
-        var result = run(cmd);
-        if (result.isSuccess()) {
-            Log.i(TAG, "Daemon started successfully");
-            DaemonConnection.getInstance().connect();
+
+        // Always start daemon in-process. The su -c app_process64 approach
+        // does not work on Android 17 - app_process64 exits without running
+        // the Java main() method. The daemon runs as the app's UID but can
+        // execute root commands via RunUtils.run() (libsu) for privileged
+        // operations like TAP creation, iptables, and kernel module loading.
+        // /dev/gunyah has 666 permissions so crosvm can access it without root.
+        if (Daemon.isRunningInProcess()) {
+            Log.i(TAG, "Daemon already running in-process, skipping start");
             return true;
-        } else {
-            Log.e(TAG, "Failed to start daemon");
-            result.printLog("droidvmd");
-            return false;
         }
+        Log.i(TAG, "Starting daemon in-process (root mode: " + !RunUtils.isNoRootMode() + ")");
+        cleanupStaleFiles();
+        var ok = Daemon.startInProcess(force);
+        if (ok) DaemonConnection.getInstance().connect();
+        return ok;
     }
 
     public boolean stopDaemon() {
         Log.i(TAG, "Stopping daemon");
-        return shellKillProcessFile(getPidFile(), SIGINT);
+        // Always use stopInProcess since the daemon runs in-process
+        // (app_process64 approach doesn't work on Android 17)
+        if (Daemon.isRunningInProcess()) {
+            Daemon.debugLog("stopDaemon: calling stopInProcess");
+            Daemon.stopInProcess();
+        } else {
+            Daemon.debugLog("stopDaemon: not running in-process, cleaning stale files");
+            cleanupStaleFiles();
+        }
+        DaemonConnection.getInstance().disconnect();
+        return true;
+    }
+
+    private void cleanupStaleFiles() {
+        var runDir = pathJoin(DATA_DIR, "run");
+        var pidFile = new File(runDir, "droidvmd.pid");
+        var tokenFile = new File(runDir, "droidvmd-token.txt");
+        var portFile = new File(runDir, "droidvmd-port.txt");
+        var lockFile = new File(runDir, "droidvmd.lock");
+        if (pidFile.exists()) { Log.i(TAG, "Cleaning stale PID file"); pidFile.delete(); }
+        if (tokenFile.exists()) tokenFile.delete();
+        if (portFile.exists()) portFile.delete();
+        if (lockFile.exists()) lockFile.delete();
     }
 
     public boolean restartDaemon() {
         Log.i(TAG, "Restarting daemon");
+        Daemon.debugLog("restartDaemon: called");
         stopDaemon();
-        while (isDaemonRunning())
+        // Wait for daemon to stop (max 5 seconds)
+        for (int i = 0; i < 5 && isDaemonRunning(); i++) {
+            Daemon.debugLog("restartDaemon: waiting for daemon to stop (attempt " + (i + 1) + ")");
             threadSleepOrKill(1000);
+        }
+        Daemon.debugLog("restartDaemon: calling startDaemon");
         return startDaemon();
     }
 
 
     public void asyncStartDaemon() {
+        Daemon.debugLog("asyncStartDaemon called from:\n" + android.util.Log.getStackTraceString(new Exception()));
         runOnPool(() -> {
             boolean ok = startDaemon();
             mainHandler.post(() -> {
@@ -189,6 +212,7 @@ public final class DaemonHelper {
     }
 
     public void asyncStopDaemon() {
+        Daemon.debugLog("asyncStopDaemon called from:\n" + android.util.Log.getStackTraceString(new Exception()));
         runOnPool(() -> {
             boolean ok = stopDaemon();
             mainHandler.post(() -> {
@@ -211,6 +235,7 @@ public final class DaemonHelper {
     }
 
     public void asyncRestartDaemon() {
+        Daemon.debugLog("asyncRestartDaemon called from:\n" + android.util.Log.getStackTraceString(new Exception()));
         runOnPool(() -> {
             boolean ok = restartDaemon();
             mainHandler.post(() -> {

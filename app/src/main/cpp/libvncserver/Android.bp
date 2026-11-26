@@ -1,0 +1,85 @@
+cc_library_shared {
+    name: "libvncserver",
+
+    srcs: [
+        // Core server sources
+        "src/libvncserver/main.c",
+        "src/libvncserver/rfbserver.c",
+        "src/libvncserver/rfbregion.c",
+        "src/libvncserver/auth.c",
+        "src/libvncserver/sockets.c",
+        "src/libvncserver/stats.c",
+        "src/libvncserver/corre.c",
+        "src/libvncserver/hextile.c",
+        "src/libvncserver/rre.c",
+        "src/libvncserver/translate.c",
+        "src/libvncserver/cutpaste.c",
+        "src/libvncserver/httpd.c",
+        "src/libvncserver/cursor.c",
+        "src/libvncserver/font.c",
+        "src/libvncserver/draw.c",
+        "src/libvncserver/selbox.c",
+        "src/libvncserver/cargs.c",
+        "src/libvncserver/ultra.c",
+        "src/libvncserver/scale.c",
+        // Common sources
+        "src/common/vncauth.c",
+        "src/common/sockets.c",
+        // Crypto (built-in, no OpenSSL/GnuTLS)
+        "src/common/crypto_included.c",
+        "src/common/sha1.c",
+        "src/common/d3des.c",
+        // TLS: none
+        "src/libvncserver/rfbssl_none.c",
+        // Zlib encodings
+        "src/libvncserver/zlib.c",
+        "src/libvncserver/zrle.c",
+        "src/libvncserver/zrleoutstream.c",
+        "src/libvncserver/zrlepalettehelper.c",
+        // LZO (built-in minilzo)
+        "src/common/minilzo.c",
+        // Tight + JPEG
+        "src/libvncserver/tight.c",
+        "src/common/turbojpeg.c",
+    ],
+
+    local_include_dirs: [
+        "src/libvncserver",
+        "src/common",
+    ],
+
+    export_include_dirs: [
+        "include",
+    ],
+
+    shared_libs: [
+        "libz",
+        "libjpeg",
+    ],
+
+    export_shared_lib_headers: [
+        "libz",
+        "libjpeg",
+    ],
+
+    cflags: [
+        "-DLIBVNCSERVER_HAVE_LIBZ",
+        "-DLIBVNCSERVER_HAVE_LIBJPEG",
+        "-Wno-unused-parameter",
+        "-Wno-sign-compare",
+        "-Wno-missing-field-initializers",
+        "-Wno-implicit-function-declaration",
+        "-Wno-pointer-sign",
+        "-Wno-incompatible-pointer-types-discards-qualifiers",
+        "-Wno-user-defined-warnings",
+        "-Wno-int-conversion",
+    ],
+
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.virt",
+    ],
+
+    vendor_available: true,
+    host_supported: true,
+}

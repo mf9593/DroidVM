@@ -13,6 +13,13 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Build to a location that supports symlinks (Android external storage doesn't).
+// Other machines keep Gradle's default; DROIDVM_BUILD_DIR overrides both.
+val preferredBuildDir = file(
+    System.getenv("DROIDVM_BUILD_DIR") ?: "/data/data/com.acside/files/home/droidvm-build/app"
+)
+if (preferredBuildDir.parentFile?.canWrite() == true) buildDir = preferredBuildDir
+
 fun runGit(vararg args: String): String {
     require(rootDir.resolve(".git").exists()) { "Not a git repository: $rootDir" }
     val proc = ProcessBuilder("git", *args)
@@ -40,15 +47,11 @@ val gitShortSha = runGit("rev-parse", "--short", "HEAD")
 val gitDescribe = (runGitOrNull("describe", "--long", "--tags", "--exclude=dev")
     ?: "0.0.0-$gitCommitCount-g$gitShortSha")
     .removePrefix("v").removePrefix("V")
-val generatedVersionName: String = if (gitDescribe.matches(Regex(".*-0-g[0-9a-f]+$"))) {
-    gitDescribe.replace(Regex("-0-g[0-9a-f]+$"), "")
-} else {
-    gitDescribe
-        .replace(Regex("([^-]*-g)"), $$"r$1")
-        .replace("-", ".")
-}
-
-val generatedVersionCode: Int = gitCommitCount * 10
+// Release version pinned for the 1.0.0 build. The git-derived values above are kept
+// so the commit this APK came from remains visible in the build log, but the store
+// version must not move on every commit once a release line exists.
+val generatedVersionName: String = "1.0.1"
+val generatedVersionCode: Int = 10001
 
 println("Version name: $generatedVersionName")
 println("Version code: $generatedVersionCode")
@@ -67,7 +70,14 @@ android {
         versionCode = generatedVersionCode
         versionName = generatedVersionName
 
+        // Pin the build-tools that carry aarch64 host binaries (36.0.0's aidl is x86_64 only,
+        // which this aarch64 workspace cannot execute). 37.0.0 also matches compileSdk 37.
+        buildToolsVersion = "37.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // NDK 29 as published is an x86_64-host package only; this workspace builds on an
+        // aarch64 host, where the patched r27d package is the one that has linux-aarch64
+        // toolchains. CMakeLists needs nothing newer than r27.
+        ndkVersion = "27.3.13750724"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -76,6 +86,7 @@ android {
                 cppFlags += "-std=c++20"
                 arguments += "-DANDROID_STL=c++_static"
                 arguments += "-DDROIDVM_VERSION=${versionName}"
+                arguments += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
             }
         }
     }
@@ -87,8 +98,25 @@ android {
         }
     }
 
+    // Prefer the shared debug keystore on this device, then the standard one. A checkout
+    // without either still assembles (an unsigned release APK) instead of failing.
+    val debugKeystore = listOfNotNull(
+        System.getenv("DROIDVM_KEYSTORE"),
+        "/data/data/com.acside/files/home/.android/debug.keystore",
+        System.getProperty("user.home") + "/.android/debug.keystore"
+    ).map(::file).firstOrNull { it.isFile }
+    signingConfigs {
+        create("debugKeystore") {
+            storeFile = debugKeystore
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
+            if (debugKeystore != null) signingConfig = signingConfigs.getByName("debugKeystore")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -133,6 +161,20 @@ android {
             // liblbx.so) is an executable file the app can run from its own
             // nativeLibraryDir -- no root, no daemon needed for a URL fetch.
             useLegacyPackaging = true
+            // The upstream terminal-emulator AAR (com.github.termux.termux-app)
+            // ships a 4 KB-aligned libtermux.so (LOAD p_align 0x1000), which
+            // Android 15+ flags on install. The in-tree codetool/terminal-emulator
+            // build links with max/common-page-size=16384, and app/src/main/jniLibs
+            // carries that 0x4000 build. Pick it over the AAR's copy.
+            pickFirsts += "lib/arm64-v8a/libtermux.so"
+            // libz is a public NDK library and the system one is already 16 KB
+            // aligned. The NDK 27 prebuilt is 4 KB aligned and was the only
+            // remaining lib that tripped the Android 15+ 16 KB install check.
+            excludes += "lib/arm64-v8a/libz.so"
+            // The in-app VNC client links vncclient statically; it does not use
+            // libvncserver. Shipping it here shadows the crosvm prebuilt under
+            // LD_LIBRARY_PATH and crashes the crosvm VNC server in its ZRLE path.
+            excludes += "lib/arm64-v8a/libvncserver.so"
         }
     }
     androidResources {
@@ -267,25 +309,12 @@ abstract class FetchTerminalFontTask : DefaultTask() {
     fun fetch() {
         val ttf = File(outputDir.get().asFile, "fonts/MapleMonoNL-NF-Regular.ttf")
         if (ttf.isFile && sha256Hex(ttf) == sha256.get()) return
-        ttf.parentFile.mkdirs()
-        val tmpZip = File(temporaryDir, "font.zip")
-        try {
-            URI(url.get()).toURL().openStream().use { input ->
-                tmpZip.outputStream().use { input.copyTo(it) }
-            }
-        } catch (e: Exception) {
-            logger.warn("Could not download terminal font (${e.message}); app uses system monospace")
-            return
-        }
-        val src = archives.zipTree(tmpZip).matching { include("**/*NL-NF-Regular.ttf") }
-            .files.firstOrNull()
-        if (src == null) {
-            logger.warn("Terminal font zip had no NL-NF-Regular.ttf; app uses system monospace")
-            return
-        }
-        src.copyTo(ttf, overwrite = true)
-        if (sha256Hex(ttf) != sha256.get())
-            logger.warn("Terminal font sha256 mismatch (upstream re-released?); keeping it anyway")
+        // The font is a cosmetic asset and the app already falls back to the
+        // system monospace when it is absent. Downloading the ~50 MB release
+        // zip on a slow/blocked network stalls the whole build at this task
+        // (seen on-device: 30+ minutes with no further task output), so treat
+        // "not cached" as "use the fallback" and never block packaging on it.
+        logger.warn("Terminal font not cached; skipping download (system monospace will be used)")
     }
 
     private fun sha256Hex(f: File): String {
@@ -371,6 +400,23 @@ androidComponents {
         variant.sources.assets?.addGeneratedSourceDirectory(
             copyNativeTask, CopyNativeBinAssetsTask::outputDir
         )
+    }
+
+}
+
+tasks.register("renameApk") {
+    dependsOn("assembleRelease")
+    doLast {
+        val apkDir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+        val signedApk = File(apkDir, "app-release.apk")
+        val targetApk = File("/storage/emulated/0/Download/code/droidvm/app/release/app-debug-signed.apk")
+        targetApk.parentFile.mkdirs()
+        if (signedApk.exists()) {
+            signedApk.copyTo(targetApk, overwrite = true)
+            println("APK copied to: ${targetApk.absolutePath}")
+        } else {
+            println("APK not found at: ${signedApk.absolutePath}")
+        }
     }
 }
 
