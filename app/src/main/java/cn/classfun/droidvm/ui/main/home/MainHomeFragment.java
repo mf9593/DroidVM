@@ -396,7 +396,8 @@ public final class MainHomeFragment extends MainBaseFragment
 
         int virtColor;
         if (!data.virtAvailable)
-            virtColor = ContextCompat.getColor(ctx, R.color.vnc_status_error);
+            // Unavailable is a state, not a failure; do not paint the row red.
+            virtColor = defaultRuntimeColor;
         else if (data.virtHardware)
             virtColor = resolveThemeColor(ctx, androidx.appcompat.R.attr.colorPrimary);
         else
@@ -409,7 +410,8 @@ public final class MainHomeFragment extends MainBaseFragment
         int hugeColor;
         if (data.hugeAvailPages < 0) {
             tvHugeStatus.setText(R.string.home_huge_none);
-            hugeColor = ContextCompat.getColor(ctx, R.color.vnc_status_error);
+            // Module not loaded is a state, not a failure; keep the default color.
+            hugeColor = defaultRuntimeColor;
         } else if (data.hugeWantPages > 0) {
             tvHugeStatus.setText(getString(R.string.home_huge_value,
                 MemoryUtils.formatGb(data.hugeAvailPages * 2),
