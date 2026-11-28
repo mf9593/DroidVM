@@ -377,7 +377,9 @@ public final class MainHomeFragment extends MainBaseFragment
                 break;
             case ROOT_DENIED:
                 rootText = R.string.home_root_denied;
-                rootColor = ContextCompat.getColor(ctx, R.color.vnc_status_error);
+                // Unauthorized is a state, not a failure: keep the row in the same
+                // default color as "unknown"/"no mode" instead of painting it red.
+                rootColor = defaultRuntimeColor;
                 break;
             case ROOT_NO_MODE:
                 rootText = R.string.home_root_no_mode;
